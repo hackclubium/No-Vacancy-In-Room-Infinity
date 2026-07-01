@@ -33,6 +33,7 @@ struct UIState {
     GameScreen currentScreen = GameScreen::TITLE;
     int selectedGuestId = -1;
     int selectedRoomNumber = -1;
+    std::string roomNumberInput;
     int selectedAlertIndex = -1;
     PhoneCall currentCall;
     bool phoneAnswered = false;
@@ -300,13 +301,15 @@ public:
     
     void openRoomList() {
         ui.currentScreen = GameScreen::ROOM_LIST;
+        ui.roomNumberInput.clear();
     }
-    
+
     void returnToLobby() {
         ui.currentScreen = GameScreen::LOBBY;
         ui.selectedGuestId = -1;
         ui.selectedRoomNumber = -1;
         ui.selectedAlertIndex = -1;
+        ui.roomNumberInput.clear();
     }
     
     void startGame() {

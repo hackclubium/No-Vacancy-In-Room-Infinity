@@ -65,16 +65,23 @@ bool processInput(SDL_Event& event) {
             }
             
             char keyChar = 0;
-            if (key >= SDLK_1 && key <= SDLK_9) {
+            if (key >= SDLK_0 && key <= SDLK_9) {
                 keyChar = '0' + (key - SDLK_0);
             }
-            
+
             if (engine.ui.currentScreen == GameEngine::GameScreen::ROOM_LIST) {
-                if (keyChar > '0' && keyChar <= '9') {
-                    int num = keyChar - '0';
-                    engine.ui.selectedRoomNumber = num;
-                } else if (key == SDLK_0) {
-                    engine.ui.selectedRoomNumber = 0;
+                if (keyChar >= '0' && keyChar <= '9') {
+                    if (engine.ui.roomNumberInput.size() >= 2) {
+                        engine.ui.roomNumberInput.clear();
+                    }
+                    engine.ui.roomNumberInput += keyChar;
+                    engine.ui.selectedRoomNumber = std::stoi(engine.ui.roomNumberInput);
+                } else if (key == SDLK_BACKSPACE) {
+                    if (!engine.ui.roomNumberInput.empty()) {
+                        engine.ui.roomNumberInput.pop_back();
+                    }
+                    engine.ui.selectedRoomNumber = engine.ui.roomNumberInput.empty() ?
+                        -1 : std::stoi(engine.ui.roomNumberInput);
                 } else if (key == SDLK_RETURN || key == SDLK_KP_ENTER) {
                     if (engine.ui.selectedRoomNumber >= 0 && engine.ui.selectedGuestId >= 0) {
                         engine.assignRoomToGuest(engine.ui.selectedRoomNumber);
@@ -166,6 +173,7 @@ bool processInput(SDL_Event& event) {
                 int idx = row * cols + col;
                 if (idx >= 0 && idx < (int)engine.state.rooms.size()) {
                     engine.ui.selectedRoomNumber = engine.state.rooms[idx].number;
+                    engine.ui.roomNumberInput = std::to_string(engine.state.rooms[idx].number);
                 }
             }
         }
