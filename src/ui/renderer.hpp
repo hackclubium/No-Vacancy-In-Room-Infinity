@@ -773,12 +773,15 @@ public:
     }
 
     void drawEventLog(GameEngine& engine) {
+        // Docked in the back-wall area (above the walkable floor line) so it
+        // never covers the guest queue, desk, or player movement.
+        const int MAX_LINES = 4;
         int logX = 10;
-        int logY = screenH - 160;
-        int logW = screenW - 20;
-        int logH = 110;
+        int logY = 70;
+        int logW = 320;
+        int logH = 14 + MAX_LINES * 16;
 
-        setColor({15, 12, 22, 200});
+        setColor({15, 12, 22, 180});
         UIRect logPanel = {logX, logY, logW, logH};
         fillRect(logPanel);
         setColor(COLOR_PANEL_BORDER);
@@ -786,9 +789,9 @@ public:
 
         drawText("EVENT LOG", logX + 10, logY - 18, fontSmall, COLOR_TEXT_DIM);
 
-        int startIdx = std::max(0, (int)engine.state.eventLog.size() - 6);
+        int startIdx = std::max(0, (int)engine.state.eventLog.size() - MAX_LINES);
         for (int i = startIdx; i < (int)engine.state.eventLog.size(); i++) {
-            int lineY = logY + 10 + (i - startIdx) * 16;
+            int lineY = logY + 8 + (i - startIdx) * 16;
             drawText(engine.state.eventLog[i], logX + 10, lineY, fontSmall, COLOR_TEXT_DIM);
         }
     }

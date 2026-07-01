@@ -325,6 +325,7 @@ public:
         state.phoneCalls.clear();
         state.phoneRinging = false;
         state.phoneRingElapsed = 0.0f;
+        state.phoneRingTimer = std::uniform_real_distribution<float>(30.0f, 60.0f)(rng);
         ui.currentCall = call;
         ui.phoneAnswered = true;
         ui.currentScreen = GameScreen::PHONE_CALL;
