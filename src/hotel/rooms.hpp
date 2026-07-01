@@ -176,4 +176,17 @@ inline std::string getRoomFloorName(int floor) {
     }
 }
 
+// The elevator only stops at floors that actually have rooms on them.
+inline std::vector<int> getAllFloors() {
+    return {0, 1, 2, 3, 4, 5, 9};
+}
+
+inline std::vector<Room*> getRoomsOnFloor(std::vector<Room>& rooms, int floor) {
+    std::vector<Room*> result;
+    for (auto& r : rooms) {
+        if (r.floor == floor) result.push_back(&r);
+    }
+    return result;
+}
+
 } // namespace room_system

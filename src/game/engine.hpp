@@ -9,18 +9,63 @@
 #include <string>
 #include <random>
 #include <algorithm>
+#include <cmath>
 
 namespace game_engine {
 
 enum class GameScreen {
     TITLE,
     LOBBY,
-    ROOM_LIST,
-    GUEST_DETAIL,
-    PHONE_CALL,
+    GUEST_DETAIL,    // lobby scene + a guest dialogue box overlay
+    PHONE_CALL,      // lobby scene + a phone dialogue box overlay
+    ELEVATOR_MENU,   // floor-select menu
+    HALLWAY,         // walkable corridor for the selected floor
     ALERT_POPUP,
     END_OF_DAY
 };
+
+enum class InteractionType {
+    NONE,
+    GUEST,
+    PHONE,
+    ELEVATOR,
+    DOOR,
+    HALLWAY_ELEVATOR
+};
+
+struct NearbyInteraction {
+    InteractionType type = InteractionType::NONE;
+    int targetId = -1; // guestId for GUEST, room number for DOOR
+    std::string prompt;
+};
+
+// Shared layout math so the engine's interaction logic and the renderer's
+// drawing code always agree on where things are, regardless of window size.
+namespace layout {
+    inline int deskX() { return 50; }
+    inline int deskW(int screenW) { return screenW - 250; }
+    inline int bottomY(int screenH) { return screenH - 200; }
+    inline int deskY(int screenH) { return bottomY(screenH) - 60; }
+    inline int elevatorX(int screenW) { return screenW - 150; }
+
+    inline float phoneX(int screenW) { return deskX() + deskW(screenW) * 0.27f; }
+    inline float keyBoardX(int screenW) { return deskX() + deskW(screenW) * 0.42f; }
+    inline float guestAreaX() { return 110.0f; } // deskX(50) + 60
+    inline float guestAreaY(int screenH) { return (float)(bottomY(screenH) + 30); }
+    inline float guestSlotX(int screenW, int index) { return guestAreaX() + index * 80.0f; }
+    inline float elevatorInteractX(int screenW) { return (float)(elevatorX(screenW) + 50); }
+    inline float interactLineY(int screenH) { return (float)(bottomY(screenH) + 15); }
+
+    inline float hallwayDoorX(int screenW, int index, int count) {
+        float startX = 220.0f;
+        float endX = (float)screenW - 100.0f;
+        if (count <= 1) return (startX + endX) / 2.0f;
+        float step = (endX - startX) / (float)(count - 1);
+        return startX + step * index;
+    }
+
+    inline float hallwayElevatorX() { return 80.0f; }
+}
 
 struct UIAction {
     std::string label;
@@ -32,8 +77,6 @@ struct UIAction {
 struct UIState {
     GameScreen currentScreen = GameScreen::TITLE;
     int selectedGuestId = -1;
-    int selectedRoomNumber = -1;
-    std::string roomNumberInput;
     int selectedAlertIndex = -1;
     PhoneCall currentCall;
     bool phoneAnswered = false;
@@ -54,62 +97,62 @@ public:
     GameState state;
     UIState ui;
     std::mt19937 rng;
-    
+
     GameEngine() : rng(std::random_device{}()) {}
-    
+
     void init() {
         state.rooms = room_system::generateRooms();
         hotel_manager::initStaff(state);
-        hotel_manager::logEvent(state, "=== SHIFT " + std::to_string(state.dayNumber) + " STARTED ===");
-        hotel_manager::logEvent(state, "You are behind the front desk. The lobby is quiet. For now.");
-        hotel_manager::logEvent(state, "Room keys hang on the wall. The phone sits silently. The elevator hums.");
-        
+
         ui.statusMessage = "Welcome to your shift. Try not to think about the layout.";
         ui.statusTimer = 6.0f;
-        
+
         state.guestSpawnTimer = 3.0f;
         state.shiftTimer = 300.0f;
         state.phoneRingTimer = 12.0f;
-        
+        state.playerX = layout::guestAreaX();
+        state.playerY = 600.0f;
+        state.currentFloor = -1;
+
         state.eventLog.clear();
         hotel_manager::logEvent(state, "=== SHIFT " + std::to_string(state.dayNumber) + " STARTED ===");
         hotel_manager::logEvent(state, "You are behind the front desk. The lobby is quiet. For now.");
         hotel_manager::logEvent(state, "Room keys hang on the wall. The phone sits silently. The elevator hums.");
     }
-    
+
     void update(float deltaTime) {
         if (ui.currentScreen == GameScreen::TITLE) {
             updateTitle(deltaTime);
             return;
         }
-        
+
         if (ui.statusTimer > 0.0f) {
             ui.statusTimer -= deltaTime;
         }
-        
+
         ui.flashTimer -= deltaTime;
         if (ui.flashTimer <= 0.0f) {
             ui.flash = !ui.flash;
             ui.flashTimer = 0.5f;
         }
-        
+
         state.shiftTimer -= deltaTime * state.timeSpeed;
-        
+
         hotel_manager::updateStaff(state, deltaTime);
         hotel_manager::updateGuestPatience(state, deltaTime);
         hotel_manager::processRoomAnomalies(state, deltaTime);
-        
+
         spawnGuests(deltaTime);
         triggerPhoneCalls(deltaTime);
         updatePhoneRinging(deltaTime);
         triggerAlerts(deltaTime);
         updateAlerts(deltaTime);
-        
+
         if (state.shiftTimer <= 0.0f) {
             endShift();
         }
     }
-    
+
     void updateTitle(float deltaTime) {
         if (ui.titleFadingIn) {
             ui.titleAlpha += deltaTime * 1.5f;
@@ -119,12 +162,12 @@ public:
             }
         }
     }
-    
+
     void spawnGuests(float deltaTime) {
         state.guestSpawnTimer -= deltaTime;
         if (state.guestSpawnTimer <= 0.0f) {
             state.guestSpawnTimer = state.guestSpawnInterval + std::uniform_real_distribution<float>(-5.0f, 5.0f)(rng);
-            
+
             Guest g = guest_system::generateGuest(state.nextGuestId++);
             g.dialogueLine = dialogue_system::getGreeting(g);
             state.waitingGuests.push_back(g);
@@ -133,7 +176,7 @@ public:
             ui.statusTimer = 3.0f;
         }
     }
-    
+
     void triggerPhoneCalls(float deltaTime) {
         if (ui.currentScreen == GameScreen::PHONE_CALL) return;
 
@@ -167,17 +210,17 @@ public:
         state.alertTimer -= deltaTime;
         if (state.alertTimer <= 0.0f) {
             state.alertTimer = std::uniform_real_distribution<float>(20.0f, 45.0f)(rng);
-            
+
             if (!state.checkedInGuests.empty()) {
                 std::uniform_int_distribution<int> guestDist(0, state.checkedInGuests.size() - 1);
                 int idx = guestDist(rng);
                 Guest& guest = state.checkedInGuests[idx];
-                
+
                 Alert alert;
                 alert.relatedGuest = guest.id;
                 alert.relatedRoom = guest.assignedRoom;
                 alert.timeLeft = 30.0f;
-                
+
                 std::vector<std::string> alertMessages = {
                     guest.name + " is complaining about strange noises from the walls.",
                     guest.name + " reports their room has changed color. Twice.",
@@ -186,16 +229,16 @@ public:
                     guest.name + " says there's someone else in their mirror who isn't them.",
                     "GUEST MISSING: " + guest.name + " was last seen entering their room.",
                 };
-                
+
                 std::uniform_int_distribution<int> msgDist(0, alertMessages.size() - 1);
                 alert.message = alertMessages[msgDist(rng)];
-                
+
                 if (msgDist(rng) == 5) {
                     alert.type = AlertType::GUEST_MISSING;
                 } else {
                     alert.type = AlertType::NOISE_COMPLAINT;
                 }
-                
+
                 state.activeAlerts.push_back(alert);
                 hotel_manager::logEvent(state, "ALERT: " + alert.message);
                 ui.statusMessage = "ALERT! " + alert.message;
@@ -203,7 +246,7 @@ public:
             }
         }
     }
-    
+
     void updateAlerts(float deltaTime) {
         for (auto& alert : state.activeAlerts) {
             if (!alert.handled) {
@@ -215,14 +258,14 @@ public:
                 }
             }
         }
-        
+
         state.activeAlerts.erase(
             std::remove_if(state.activeAlerts.begin(), state.activeAlerts.end(),
                 [](const Alert& a) { return a.handled && a.timeLeft <= -5.0f; }),
             state.activeAlerts.end()
         );
     }
-    
+
     void endShift() {
         int score = state.guestsServed * 10 + state.complaintsHandled * 5 - state.roomsLost * 20;
         state.lastShiftScore = score;
@@ -258,12 +301,13 @@ public:
         }
 
         state.activeAlerts.clear();
+        state.currentFloor = -1;
 
         ui.currentScreen = GameScreen::LOBBY;
         hotel_manager::logEvent(state, "=== SHIFT " + std::to_string(state.dayNumber) + " STARTED ===");
         hotel_manager::logEvent(state, "The hotel seems slightly more... wrong than yesterday.");
     }
-    
+
     void answerPhone() {
         if (!state.phoneRinging || state.phoneCalls.empty()) return;
 
@@ -277,96 +321,232 @@ public:
         ui.currentScreen = GameScreen::PHONE_CALL;
         hotel_manager::logEvent(state, "Answered call from: " + call.callerName);
     }
-    
+
     void hangUpPhone() {
         ui.currentScreen = GameScreen::LOBBY;
         ui.phoneAnswered = false;
     }
-    
+
     void assignRoomToGuest(int roomNumber) {
         if (ui.selectedGuestId < 0) return;
-        
+
         Guest* guest = hotel_manager::findGuest(state, ui.selectedGuestId);
         if (!guest) return;
-        
+
         if (hotel_manager::assignRoom(state, *guest, roomNumber)) {
             Room* room = hotel_manager::findRoom(state, roomNumber);
             std::string reaction = dialogue_system::getRoomReaction(*guest, room ? *room : state.rooms[0]);
             hotel_manager::logEvent(state, reaction);
-            
+
             guest->dialogueLine = dialogue_system::getResponse(*guest, "ASSIGN_ROOM", room);
-            
+
             auto it = std::find_if(state.waitingGuests.begin(), state.waitingGuests.end(),
                 [guest](const Guest& g) { return g.id == guest->id; });
             if (it != state.waitingGuests.end()) {
                 state.checkedInGuests.push_back(*it);
                 state.waitingGuests.erase(it);
             }
-            
+
             ui.selectedGuestId = -1;
-            ui.selectedRoomNumber = -1;
-            ui.currentScreen = GameScreen::LOBBY;
             ui.statusMessage = guest->dialogueLine;
             ui.statusTimer = 4.0f;
         }
     }
-    
+
     void handleAlertAction(int alertIndex, const std::string& action) {
         if (alertIndex < 0 || alertIndex >= (int)state.activeAlerts.size()) return;
-        
+
         hotel_manager::handleAlert(state, state.activeAlerts[alertIndex], action);
         ui.currentScreen = GameScreen::LOBBY;
         ui.selectedAlertIndex = -1;
-    }
-    
-    void selectGuest(int guestId) {
-        ui.selectedGuestId = guestId;
-        ui.selectedRoomNumber = -1;
-        ui.currentScreen = GameScreen::GUEST_DETAIL;
-    }
-    
-    void openRoomList() {
-        ui.currentScreen = GameScreen::ROOM_LIST;
-        ui.roomNumberInput.clear();
     }
 
     void returnToLobby() {
         ui.currentScreen = GameScreen::LOBBY;
         ui.selectedGuestId = -1;
-        ui.selectedRoomNumber = -1;
         ui.selectedAlertIndex = -1;
-        ui.roomNumberInput.clear();
+        state.currentFloor = -1;
     }
-    
+
     void startGame() {
         init();
         ui.currentScreen = GameScreen::LOBBY;
     }
-    
+
     bool isWaitingGuest(int guestId) {
         for (auto& g : state.waitingGuests) {
             if (g.id == guestId) return true;
         }
         return false;
     }
-    
+
     Guest* getSelectedGuest() {
         if (ui.selectedGuestId < 0) return nullptr;
         return hotel_manager::findGuest(state, ui.selectedGuestId);
     }
-    
+
     bool hasUnhandledAlerts() {
         for (auto& a : state.activeAlerts) {
             if (!a.handled) return true;
         }
         return false;
     }
-    
+
     int getFirstUnhandledAlert() {
         for (int i = 0; i < (int)state.activeAlerts.size(); i++) {
             if (!state.activeAlerts[i].handled) return i;
         }
         return -1;
+    }
+
+    // === Movement & spatial interaction ===
+
+    void movePlayer(float dx, float dy, float deltaTime, int screenW, int screenH) {
+        if (ui.currentScreen != GameScreen::LOBBY && ui.currentScreen != GameScreen::HALLWAY) return;
+
+        float len = std::sqrt(dx * dx + dy * dy);
+        if (len > 0.0001f) {
+            dx /= len;
+            dy /= len;
+        }
+        const float speed = 220.0f;
+
+        if (ui.currentScreen == GameScreen::LOBBY) {
+            state.playerX += dx * speed * deltaTime;
+            state.playerY += dy * speed * deltaTime;
+            float minX = 30.0f;
+            float maxX = (float)screenW - 30.0f;
+            float minY = (float)layout::bottomY(screenH) + 10.0f;
+            float maxY = (float)screenH - 40.0f;
+            state.playerX = std::clamp(state.playerX, minX, maxX);
+            state.playerY = std::clamp(state.playerY, minY, maxY);
+        } else {
+            state.hallwayPlayerX += dx * speed * deltaTime;
+            state.hallwayPlayerX = std::clamp(state.hallwayPlayerX, 60.0f, (float)screenW - 60.0f);
+        }
+    }
+
+    NearbyInteraction getNearbyInteraction(int screenW, int screenH) {
+        NearbyInteraction result;
+        const float RADIUS = 50.0f;
+
+        if (ui.currentScreen == GameScreen::LOBBY) {
+            for (size_t i = 0; i < state.waitingGuests.size() && i < 6; i++) {
+                float gx = layout::guestSlotX(screenW, (int)i) + 15.0f;
+                float gy = layout::guestAreaY(screenH) + 25.0f;
+                float dx = state.playerX - gx;
+                float dy = state.playerY - gy;
+                if (dx * dx + dy * dy < RADIUS * RADIUS) {
+                    result.type = InteractionType::GUEST;
+                    result.targetId = state.waitingGuests[i].id;
+                    result.prompt = "[E] Talk to " + state.waitingGuests[i].name;
+                    return result;
+                }
+            }
+
+            if (state.phoneRinging) {
+                float px = layout::phoneX(screenW) + 20.0f;
+                float py = layout::interactLineY(screenH);
+                float dx = state.playerX - px;
+                float dy = state.playerY - py;
+                if (dx * dx + dy * dy < RADIUS * RADIUS) {
+                    result.type = InteractionType::PHONE;
+                    result.prompt = "[E] Answer Phone";
+                    return result;
+                }
+            }
+
+            {
+                float ex = layout::elevatorInteractX(screenW);
+                float ey = layout::interactLineY(screenH);
+                float dx = state.playerX - ex;
+                float dy = state.playerY - ey;
+                if (dx * dx + dy * dy < RADIUS * RADIUS) {
+                    result.type = InteractionType::ELEVATOR;
+                    result.prompt = "[E] Call Elevator";
+                    return result;
+                }
+            }
+        } else if (ui.currentScreen == GameScreen::HALLWAY) {
+            auto doors = room_system::getRoomsOnFloor(state.rooms, state.currentFloor);
+            for (size_t i = 0; i < doors.size(); i++) {
+                float doorX = layout::hallwayDoorX(screenW, (int)i, (int)doors.size());
+                if (std::fabs(state.hallwayPlayerX - doorX) < RADIUS) {
+                    result.type = InteractionType::DOOR;
+                    result.targetId = doors[i]->number;
+                    result.prompt = "[E] " + doors[i]->name;
+                    return result;
+                }
+            }
+
+            if (std::fabs(state.hallwayPlayerX - layout::hallwayElevatorX()) < RADIUS) {
+                result.type = InteractionType::HALLWAY_ELEVATOR;
+                result.prompt = "[E] Elevator";
+                return result;
+            }
+        }
+
+        return result;
+    }
+
+    void interact(int screenW, int screenH) {
+        if (ui.currentScreen == GameScreen::LOBBY) {
+            NearbyInteraction n = getNearbyInteraction(screenW, screenH);
+            if (n.type == InteractionType::GUEST) {
+                ui.selectedGuestId = n.targetId;
+                ui.currentScreen = GameScreen::GUEST_DETAIL;
+            } else if (n.type == InteractionType::PHONE) {
+                answerPhone();
+            } else if (n.type == InteractionType::ELEVATOR) {
+                openElevatorMenu();
+            }
+        } else if (ui.currentScreen == GameScreen::GUEST_DETAIL) {
+            ui.currentScreen = GameScreen::LOBBY;
+        } else if (ui.currentScreen == GameScreen::PHONE_CALL) {
+            hangUpPhone();
+        } else if (ui.currentScreen == GameScreen::ELEVATOR_MENU) {
+            confirmFloorSelection(screenW);
+        } else if (ui.currentScreen == GameScreen::HALLWAY) {
+            NearbyInteraction n = getNearbyInteraction(screenW, screenH);
+            if (n.type == InteractionType::DOOR) {
+                interactWithDoor(n.targetId);
+            } else if (n.type == InteractionType::HALLWAY_ELEVATOR) {
+                ui.currentScreen = GameScreen::ELEVATOR_MENU;
+            }
+        }
+    }
+
+    void interactWithDoor(int roomNumber) {
+        Room* room = hotel_manager::findRoom(state, roomNumber);
+        if (!room) return;
+
+        if (ui.selectedGuestId >= 0 && !room->occupied && isWaitingGuest(ui.selectedGuestId)) {
+            assignRoomToGuest(roomNumber);
+        }
+        // Otherwise: no-op. Room info is already shown passively via proximity
+        // (see renderer's use of getNearbyInteraction for the info tooltip).
+    }
+
+    void openElevatorMenu() {
+        ui.currentScreen = GameScreen::ELEVATOR_MENU;
+        state.elevatorMenuIndex = 0;
+    }
+
+    void moveElevatorSelection(int delta) {
+        int count = (int)room_system::getAllFloors().size();
+        state.elevatorMenuIndex = ((state.elevatorMenuIndex + delta) % count + count) % count;
+    }
+
+    void confirmFloorSelection(int screenW) {
+        auto floors = room_system::getAllFloors();
+        state.currentFloor = floors[state.elevatorMenuIndex];
+        state.hallwayPlayerX = (float)screenW / 2.0f;
+        ui.currentScreen = GameScreen::HALLWAY;
+    }
+
+    void exitHallwayToLobby() {
+        ui.currentScreen = GameScreen::LOBBY;
+        state.currentFloor = -1;
     }
 };
 

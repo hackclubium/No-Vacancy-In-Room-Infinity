@@ -164,4 +164,11 @@ struct GameState {
     int complaintsHandled = 0;
     int roomsLost = 0;
     int lastShiftScore = 0;
+
+    // Player movement / spatial navigation
+    float playerX = 640.0f;
+    float playerY = 600.0f;
+    float hallwayPlayerX = 640.0f;
+    int currentFloor = -1;      // floor currently shown in the HALLWAY screen, -1 = not in a hallway
+    int elevatorMenuIndex = 0;  // selected index into the floor list while ELEVATOR_MENU is open
 };
