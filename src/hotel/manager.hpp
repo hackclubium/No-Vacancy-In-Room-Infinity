@@ -105,11 +105,16 @@ inline bool assignRoom(GameState& state, Guest& guest, int roomNumber) {
         logEvent(state, "The ghost seems... quite happy with Room 0. It's the only room that matches their state of existence.");
     }
     
-    if (guest.specialNeed == "No mirrors, please. And perhaps a north-facing room." && 
+    if (guest.specialNeed == "No mirrors, please. And perhaps a north-facing room." &&
         room->rule == RoomRule::MIRRORLESS) {
         logEvent(state, guest.name + " is very pleased with the mirror situation. Perfect rating likely.");
     }
-    
+
+    if (!room->isClean) {
+        logEvent(state, guest.name + " wrinkles their nose. \"Has anyone cleaned this room? At all?\"");
+        guest.patience = std::max(0.0f, guest.patience - 0.1f);
+    }
+
     state.guestsServed++;
     return true;
 }
@@ -124,7 +129,15 @@ inline void processRoomAnomalies(GameState& state, float deltaTime) {
         if (!guest) continue;
         
         room.anomalyLevel += deltaTime * 0.05f;
-        
+
+        if (!room.needsMaintenance) {
+            std::uniform_real_distribution<float> maintChance(0.0f, 1.0f);
+            if (maintChance(rng) < deltaTime * 0.008f) {
+                room.needsMaintenance = true;
+                logEvent(state, room.name + " could use some maintenance attention.");
+            }
+        }
+
         switch (room.rule) {
             case RoomRule::DUPLICATES_OCCUPANT: {
                 std::uniform_real_distribution<float> dupChance(0.0f, 1.0f);
@@ -235,6 +248,32 @@ inline void processRoomAnomalies(GameState& state, float deltaTime) {
                 }
                 break;
             }
+            case RoomRule::TIMELOOP_HOUR: {
+                std::uniform_real_distribution<float> loopChance(0.0f, 1.0f);
+                if (loopChance(rng) < deltaTime * 0.025f) {
+                    Alert alert;
+                    alert.type = AlertType::TEMPORAL_LOOP;
+                    alert.message = guest->name + " says it's 3:14 AM again in Room 8. They've counted fourteen repeats so far.";
+                    alert.relatedRoom = room.number;
+                    alert.relatedGuest = guest->id;
+                    alert.timeLeft = 35.0f;
+                    state.activeAlerts.push_back(alert);
+                }
+                break;
+            }
+            case RoomRule::OPENS_YESTERDAY: {
+                std::uniform_real_distribution<float> paradoxChance(0.0f, 1.0f);
+                if (paradoxChance(rng) < deltaTime * 0.02f) {
+                    Alert alert;
+                    alert.type = AlertType::PARADOX_DETECTED;
+                    alert.message = guest->name + " just passed their own yesterday-self in the hallway. Neither of them handled it well.";
+                    alert.relatedRoom = room.number;
+                    alert.relatedGuest = guest->id;
+                    alert.timeLeft = 35.0f;
+                    state.activeAlerts.push_back(alert);
+                }
+                break;
+            }
             default: break;
         }
     }
@@ -289,6 +328,7 @@ inline void checkOut(GameState& state, Room& room) {
         room.occupied = false;
         room.guestId = -1;
         room.duplicateIds.clear();
+        room.isClean = false;
     }
 }
 
@@ -353,6 +393,11 @@ inline void updateStaff(GameState& state, float deltaTime) {
         if (!staff.available) {
             staff.taskTimer -= deltaTime;
             if (staff.taskTimer <= 0.0f) {
+                Room* room = findRoom(state, staff.assignedRoom);
+                if (room) {
+                    if (staff.currentTask == "Cleaning") room->isClean = true;
+                    else if (staff.currentTask == "Repairing") room->needsMaintenance = false;
+                }
                 staff.available = true;
                 staff.assignedRoom = -1;
                 staff.currentTask = "";
@@ -365,7 +410,7 @@ inline void updateStaff(GameState& state, float deltaTime) {
 inline void updateGuestPatience(GameState& state, float deltaTime) {
     for (size_t i = 0; i < state.waitingGuests.size(); ) {
         Guest& guest = state.waitingGuests[i];
-        guest.patience -= deltaTime * 0.01f * state.timeSpeed;
+        guest.patience -= deltaTime * 0.005f * state.timeSpeed;
 
         if (guest.patience < 0.3f && guest.patience > 0.0f && !guest.complained) {
             guest.complained = true;

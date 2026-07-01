@@ -143,15 +143,12 @@ inline Guest generateGuest(int id, bool forceInspector = false) {
     return g;
 }
 
-inline Guest generateInspector() {
-    static bool inspectorGenerated = false;
-    int id = 999;
+inline Guest generateInspector(int id) {
     Guest g = generateGuest(id, true);
     g.name = "Inspector Vex";
     g.request = "Just observing. Carry on with your work.";
     g.dialogueLine = "Hotel Inspection Bureau. Don't mind me.";
     g.specialNeed = "I need to see everything.";
-    inspectorGenerated = true;
     return g;
 }
 

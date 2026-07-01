@@ -658,6 +658,7 @@ public:
             if (room->occupied) doorColor = {60, 30, 30, 255};
             if (room->rule != RoomRule::NORMAL) doorColor = {45, 35, 60, 255};
             if (room->rule != RoomRule::NORMAL && room->occupied) doorColor = {55, 25, 55, 255};
+            if (!room->occupied && (!room->isClean || room->needsMaintenance)) doorColor = {50, 45, 35, 255};
 
             setColor(doorColor);
             UIRect door = {(int)doorX - 25, corridorY - 60, 50, 120};
@@ -688,11 +689,18 @@ public:
 
                 drawText(sel->name + " (" + room_system::getRuleName(sel->rule) + ")", infoX + 15, infoY + 8, font, COLOR_TEXT_BRIGHT);
                 drawText(room_system::getRuleDescription(sel->rule), infoX + 15, infoY + 32, fontSmall, COLOR_TEXT);
-                drawText("Status: " + std::string(sel->occupied ? "Occupied" : "Vacant") + " | Times Used: " + std::to_string(sel->timesUsed),
-                    infoX + 15, infoY + 54, fontSmall, COLOR_TEXT_DIM);
+
+                std::string statusLine = "Status: " + std::string(sel->occupied ? "Occupied" : "Vacant") + " | Times Used: " + std::to_string(sel->timesUsed);
+                if (!sel->isClean) statusLine += " | Needs cleaning";
+                if (sel->needsMaintenance) statusLine += " | Needs maintenance";
+                drawText(statusLine, infoX + 15, infoY + 54, fontSmall, COLOR_TEXT_DIM);
 
                 if (engine.ui.selectedGuestId >= 0 && engine.isWaitingGuest(engine.ui.selectedGuestId) && !sel->occupied) {
                     drawText("[E] Assign this room to your selected guest", infoX + 15, infoY + 74, fontSmall, COLOR_SUCCESS);
+                } else if (engine.ui.selectedGuestId < 0 && !sel->occupied && !sel->isClean) {
+                    drawText("[E] Send a maid to clean this room", infoX + 15, infoY + 74, fontSmall, COLOR_WARN);
+                } else if (engine.ui.selectedGuestId < 0 && !sel->occupied && sel->needsMaintenance) {
+                    drawText("[E] Send maintenance to fix this room", infoX + 15, infoY + 74, fontSmall, COLOR_WARN);
                 }
             }
         }
@@ -775,28 +783,60 @@ public:
         drawText("SHIFT COMPLETE", screenW/2, 100, fontTitle, COLOR_TEXT_BRIGHT, true);
         drawText("Day " + std::to_string(engine.state.dayNumber) + " Summary", screenW/2, 145, font, COLOR_TEXT, true);
 
-        int panelX = screenW/2 - 200;
+        int panelW = 480;
+        int panelX = screenW / 2 - panelW / 2;
+        int contentW = panelW - 60;
+
+        std::vector<std::string> inspectorLines;
+        if (engine.state.hadInspectorLastShift) {
+            inspectorLines = wrapText(engine.state.lastInspectorLine, fontSmall, contentW);
+        }
+
+        int cursorY = 30;
+        int guestsY = cursorY; cursorY += 35;
+        int complaintsY = cursorY; cursorY += 35;
+        int lostY = cursorY; cursorY += 45;
+        int shiftScoreY = cursorY; cursorY += 30;
+        int totalScoreY = cursorY; cursorY += 30;
+        int inspectorY = cursorY;
+        if (!inspectorLines.empty()) {
+            cursorY += (int)inspectorLines.size() * 18 + 4 + 20;
+        }
+        int buttonY = cursorY + 15;
+        int panelH = buttonY + 50;
         int panelY = 200;
 
         setColor(COLOR_PANEL_BG);
-        UIRect panel = {panelX, panelY, 400, 250};
+        UIRect panel = {panelX, panelY, panelW, panelH};
         fillRect(panel);
         setColor(COLOR_PANEL_BORDER);
         drawRect(panel);
 
-        drawText("Guests Served: " + std::to_string(engine.state.guestsServed), panelX + 30, panelY + 30, font, COLOR_SUCCESS);
-        drawText("Complaints Handled: " + std::to_string(engine.state.complaintsHandled), panelX + 30, panelY + 65, font, COLOR_TEXT);
-        drawText("Rooms Lost: " + std::to_string(engine.state.roomsLost), panelX + 30, panelY + 100, font, COLOR_DANGER);
+        drawText("Guests Served: " + std::to_string(engine.state.guestsServed), panelX + 30, panelY + guestsY, font, COLOR_SUCCESS);
+        drawText("Complaints Handled: " + std::to_string(engine.state.complaintsHandled), panelX + 30, panelY + complaintsY, font, COLOR_TEXT);
+        drawText("Rooms Lost: " + std::to_string(engine.state.roomsLost), panelX + 30, panelY + lostY, font, COLOR_DANGER);
 
-        drawText("Shift Score: " + std::to_string(engine.state.lastShiftScore), panelX + 30, panelY + 145, font, COLOR_HIGHLIGHT);
-        drawText("Total Score: " + std::to_string(engine.state.playerScore), panelX + 30, panelY + 175, font, COLOR_HIGHLIGHT);
+        drawText("Shift Score: " + std::to_string(engine.state.lastShiftScore), panelX + 30, panelY + shiftScoreY, font, COLOR_HIGHLIGHT);
+        drawText("Total Score: " + std::to_string(engine.state.playerScore), panelX + 30, panelY + totalScoreY, font, COLOR_HIGHLIGHT);
+
+        if (!inspectorLines.empty()) {
+            int y = panelY + inspectorY;
+            for (auto& line : inspectorLines) {
+                drawText(line, panelX + 30, y, fontSmall, COLOR_ACCENT2);
+                y += 18;
+            }
+            UIColor resultColor = engine.state.lastInspectionResult >= 0 ? COLOR_SUCCESS : COLOR_DANGER;
+            std::string resultText = "Inspection result: " +
+                std::string(engine.state.lastInspectionResult >= 0 ? "+" : "") + std::to_string(engine.state.lastInspectionResult);
+            drawText(resultText, panelX + 30, y + 4, fontSmall, resultColor);
+        }
 
         setColor(COLOR_BUTTON_BG);
-        UIRect nextBtn = {panelX + 50, panelY + 210, 300, 40};
+        UIRect nextBtn = {panelX + 50, panelY + buttonY, panelW - 100, 40};
         fillRect(nextBtn);
         setColor(COLOR_PANEL_BORDER);
         drawRect(nextBtn);
-        drawText("[ENTER] Start Next Shift", panelX + 60, panelY + 218, font, COLOR_TEXT);
+        drawText("[ENTER] Start Next Shift", panelX + 60, panelY + buttonY + 8, font, COLOR_TEXT);
     }
 
     void drawTitleScreen(GameEngine& engine) {

@@ -109,10 +109,11 @@ public:
 
         state.guestSpawnTimer = 3.0f;
         state.shiftTimer = 300.0f;
-        state.phoneRingTimer = 12.0f;
+        state.phoneRingTimer = std::uniform_real_distribution<float>(20.0f, 25.0f)(rng);
         state.playerX = layout::guestAreaX();
         state.playerY = 600.0f;
         state.currentFloor = -1;
+        state.nextInspectorDay = state.dayNumber + std::uniform_int_distribution<int>(3, 5)(rng);
 
         state.eventLog.clear();
         hotel_manager::logEvent(state, "=== SHIFT " + std::to_string(state.dayNumber) + " STARTED ===");
@@ -175,10 +176,18 @@ public:
     void spawnGuests(float deltaTime) {
         state.guestSpawnTimer -= deltaTime;
         if (state.guestSpawnTimer <= 0.0f) {
-            state.guestSpawnTimer = state.guestSpawnInterval + std::uniform_real_distribution<float>(-5.0f, 5.0f)(rng);
+            state.guestSpawnTimer = state.guestSpawnInterval + std::uniform_real_distribution<float>(-8.0f, 8.0f)(rng);
 
-            Guest g = guest_system::generateGuest(state.nextGuestId++);
-            g.dialogueLine = dialogue_system::getGreeting(g);
+            Guest g;
+            if (!state.inspectorPresent && state.dayNumber >= state.nextInspectorDay) {
+                g = guest_system::generateInspector(state.nextGuestId++);
+                state.inspectorPresent = true;
+                state.inspectorGuestId = g.id;
+                state.nextInspectorDay = state.dayNumber + std::uniform_int_distribution<int>(3, 5)(rng);
+            } else {
+                g = guest_system::generateGuest(state.nextGuestId++);
+                g.dialogueLine = dialogue_system::getGreeting(g);
+            }
             state.waitingGuests.push_back(g);
             hotel_manager::logEvent(state, g.name + " (" + guest_system::getGuestTypeName(g.type) + ") has arrived at the front desk.");
             ui.statusMessage = g.name + " is waiting at the front desk.";
@@ -218,7 +227,7 @@ public:
     void triggerAlerts(float deltaTime) {
         state.alertTimer -= deltaTime;
         if (state.alertTimer <= 0.0f) {
-            state.alertTimer = std::uniform_real_distribution<float>(20.0f, 45.0f)(rng);
+            state.alertTimer = std::uniform_real_distribution<float>(40.0f, 70.0f)(rng);
 
             if (!state.checkedInGuests.empty()) {
                 std::uniform_int_distribution<int> guestDist(0, state.checkedInGuests.size() - 1);
@@ -230,23 +239,23 @@ public:
                 alert.relatedRoom = guest.assignedRoom;
                 alert.timeLeft = 30.0f;
 
-                std::vector<std::string> alertMessages = {
-                    guest.name + " is complaining about strange noises from the walls.",
-                    guest.name + " reports their room has changed color. Twice.",
-                    guest.name + " has lost something important in their room.",
-                    guest.name + " needs extra towels delivered immediately.",
-                    guest.name + " says there's someone else in their mirror who isn't them.",
-                    "GUEST MISSING: " + guest.name + " was last seen entering their room.",
+                struct AlertOption { std::string message; AlertType type; };
+                std::vector<AlertOption> options = {
+                    {guest.name + " is complaining about strange noises from the walls.", AlertType::NOISE_COMPLAINT},
+                    {guest.name + " reports their room has changed color. Twice.", AlertType::NOISE_COMPLAINT},
+                    {guest.name + " has lost something important in their room.", AlertType::NOISE_COMPLAINT},
+                    {guest.name + " needs extra towels delivered immediately.", AlertType::NOISE_COMPLAINT},
+                    {guest.name + " says there's someone else in their mirror who isn't them.", AlertType::NOISE_COMPLAINT},
+                    {"GUEST MISSING: " + guest.name + " was last seen entering their room.", AlertType::GUEST_MISSING},
+                    {guest.name + " says their wastebasket just caught fire. Spontaneously. It's fine now, but still.", AlertType::FIRE},
+                    {"Water is seeping under " + guest.name + "'s door from somewhere. There is no bathroom near that wall.", AlertType::FLOOD},
+                    {"The elevator just called the front desk directly about " + guest.name + "'s floor. It wants to talk about its feelings.", AlertType::ELEVATOR_SENTIENT},
                 };
 
-                std::uniform_int_distribution<int> msgDist(0, alertMessages.size() - 1);
-                alert.message = alertMessages[msgDist(rng)];
-
-                if (msgDist(rng) == 5) {
-                    alert.type = AlertType::GUEST_MISSING;
-                } else {
-                    alert.type = AlertType::NOISE_COMPLAINT;
-                }
+                std::uniform_int_distribution<int> optDist(0, (int)options.size() - 1);
+                const AlertOption& chosen = options[optDist(rng)];
+                alert.message = chosen.message;
+                alert.type = chosen.type;
 
                 state.activeAlerts.push_back(alert);
                 hotel_manager::logEvent(state, "ALERT: " + alert.message);
@@ -277,6 +286,28 @@ public:
 
     void endShift() {
         int score = state.guestsServed * 10 + state.complaintsHandled * 5 - state.roomsLost * 20;
+
+        bool hadInspector = state.inspectorGuestId >= 0;
+        std::string inspectorLine;
+        int inspectionResult = 0;
+        if (hadInspector) {
+            Guest* inspector = hotel_manager::findGuest(state, state.inspectorGuestId);
+            if (inspector && inspector->checkedIn) {
+                Room* room = hotel_manager::findRoom(state, inspector->assignedRoom);
+                int roomScore = room ? room_system::getRoomImpressionScore(room->rule) : 0;
+                int waitScore = (int)((inspector->patience - 0.5f) * 40.0f);
+                inspectionResult = roomScore + waitScore;
+                std::string roomDesc = room ? (room->name + " (" + room_system::getRuleName(room->rule) + ")") : "their room";
+                inspectorLine = inspectionResult >= 0
+                    ? "Inspector Vex was impressed by " + roomDesc + "."
+                    : "Inspector Vex was NOT impressed by " + roomDesc + ".";
+            } else {
+                inspectionResult = -50;
+                inspectorLine = "Inspector Vex left without ever being shown a room. Not a good look.";
+            }
+            score += inspectionResult;
+        }
+
         state.lastShiftScore = score;
         state.playerScore += score;
 
@@ -284,6 +315,16 @@ public:
         hotel_manager::logEvent(state, "Guests served: " + std::to_string(state.guestsServed));
         hotel_manager::logEvent(state, "Complaints handled: " + std::to_string(state.complaintsHandled));
         hotel_manager::logEvent(state, "Rooms lost: " + std::to_string(state.roomsLost));
+
+        state.hadInspectorLastShift = hadInspector;
+        if (hadInspector) {
+            hotel_manager::logEvent(state, inspectorLine);
+            hotel_manager::logEvent(state, "Inspection result: " + std::string(inspectionResult >= 0 ? "+" : "") + std::to_string(inspectionResult));
+            state.lastInspectorLine = inspectorLine;
+            state.lastInspectionResult = inspectionResult;
+            state.inspectorGuestId = -1;
+            state.inspectorPresent = false;
+        }
 
         ui.currentScreen = GameScreen::END_OF_DAY;
     }
@@ -347,6 +388,10 @@ public:
             Room* room = hotel_manager::findRoom(state, roomNumber);
             std::string reaction = dialogue_system::getRoomReaction(*guest, room ? *room : state.rooms[0]);
             hotel_manager::logEvent(state, reaction);
+
+            if (room) {
+                hotel_manager::handleRoomSideEffects(state, *room, *guest);
+            }
 
             guest->dialogueLine = dialogue_system::getResponse(*guest, "ASSIGN_ROOM", room);
 
@@ -534,6 +579,15 @@ public:
 
         if (ui.selectedGuestId >= 0 && !room->occupied && isWaitingGuest(ui.selectedGuestId)) {
             assignRoomToGuest(roomNumber);
+            return;
+        }
+
+        if (ui.selectedGuestId < 0 && !room->occupied) {
+            if (!room->isClean) {
+                hotel_manager::sendStaffToRoom(state, roomNumber, StaffType::MAID);
+            } else if (room->needsMaintenance) {
+                hotel_manager::sendStaffToRoom(state, roomNumber, StaffType::MAINTENANCE);
+            }
         }
         // Otherwise: no-op. Room info is already shown passively via proximity
         // (see renderer's use of getNearbyInteraction for the info tooltip).

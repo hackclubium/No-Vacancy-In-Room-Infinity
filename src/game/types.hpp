@@ -153,13 +153,17 @@ struct GameState {
     float timeSpeed = 1.0f;
     int nextGuestId = 1;
     float guestSpawnTimer = 0.0f;
-    float guestSpawnInterval = 15.0f;
+    float guestSpawnInterval = 28.0f;
     float phoneRingTimer = 0.0f;
     float phoneRingElapsed = 0.0f;
     float alertTimer = 0.0f;
     bool phoneRinging = false;
     bool inspectorPresent = false;
     int inspectorGuestId = -1;
+    int nextInspectorDay = 4;
+    bool hadInspectorLastShift = false;
+    std::string lastInspectorLine;
+    int lastInspectionResult = 0;
     int guestsServed = 0;
     int complaintsHandled = 0;
     int roomsLost = 0;

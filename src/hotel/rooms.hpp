@@ -189,4 +189,29 @@ inline std::vector<Room*> getRoomsOnFloor(std::vector<Room>& rooms, int floor) {
     return result;
 }
 
+// How favorably a room rule reads to someone judging the hotel (the
+// Inspector). Positive = good impression, negative = bad.
+inline int getRoomImpressionScore(RoomRule rule) {
+    switch (rule) {
+        case RoomRule::NORMAL: return 10;
+        case RoomRule::MIRRORLESS: return 20;
+        case RoomRule::LOST_AND_FOUND: return 15;
+        case RoomRule::BIGGER_INSIDE: return 10;
+        case RoomRule::DREAM_ROOM: return 15;
+        case RoomRule::INFINITE_CORRIDOR: return -5;
+        case RoomRule::OPENS_YESTERDAY: return -5;
+        case RoomRule::DUPLICATES_OCCUPANT: return -10;
+        case RoomRule::SWAPS_IDENTITIES: return -10;
+        case RoomRule::AMPLIFIES_SOUND: return -15;
+        case RoomRule::REVERSES_AGE: return -10;
+        case RoomRule::GRAVITY_SHIFT: return -15;
+        case RoomRule::TIMELOOP_HOUR: return -15;
+        case RoomRule::MEMORY_WIPE: return -20;
+        case RoomRule::EATS_BAGGAGE: return -20;
+        case RoomRule::MULTIPLIES_BILL: return -20;
+        case RoomRule::DOES_NOT_EXIST: return -20;
+    }
+    return 0;
+}
+
 } // namespace room_system
