@@ -142,6 +142,15 @@ public:
         hotel_manager::updateGuestPatience(state, deltaTime);
         hotel_manager::processRoomAnomalies(state, deltaTime);
 
+        if (ui.selectedGuestId >= 0 && !hotel_manager::findGuest(state, ui.selectedGuestId)) {
+            ui.selectedGuestId = -1;
+            ui.statusMessage = "Your selected guest stormed out!";
+            ui.statusTimer = 3.0f;
+            if (ui.currentScreen == GameScreen::GUEST_DETAIL) {
+                ui.currentScreen = GameScreen::LOBBY;
+            }
+        }
+
         spawnGuests(deltaTime);
         triggerPhoneCalls(deltaTime);
         updatePhoneRinging(deltaTime);
@@ -428,7 +437,9 @@ public:
 
     NearbyInteraction getNearbyInteraction(int screenW, int screenH) {
         NearbyInteraction result;
-        const float RADIUS = 50.0f;
+        // Kept small enough that adjacent guest slots (80px apart) and the
+        // most crowded hallway (11 doors, ~96px apart) never overlap.
+        const float RADIUS = 38.0f;
 
         if (ui.currentScreen == GameScreen::LOBBY) {
             for (size_t i = 0; i < state.waitingGuests.size() && i < 6; i++) {
@@ -511,7 +522,7 @@ public:
             if (n.type == InteractionType::DOOR) {
                 interactWithDoor(n.targetId);
             } else if (n.type == InteractionType::HALLWAY_ELEVATOR) {
-                ui.currentScreen = GameScreen::ELEVATOR_MENU;
+                openElevatorMenu();
             }
         }
     }
@@ -529,7 +540,9 @@ public:
 
     void openElevatorMenu() {
         ui.currentScreen = GameScreen::ELEVATOR_MENU;
-        state.elevatorMenuIndex = 0;
+        auto floors = room_system::getAllFloors();
+        auto it = std::find(floors.begin(), floors.end(), state.currentFloor);
+        state.elevatorMenuIndex = (it != floors.end()) ? (int)(it - floors.begin()) : 0;
     }
 
     void moveElevatorSelection(int delta) {

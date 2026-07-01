@@ -449,10 +449,7 @@ public:
         drawDimOverlay();
 
         Guest* guest = engine.getSelectedGuest();
-        if (!guest) {
-            engine.ui.currentScreen = GameEngine::GameScreen::LOBBY;
-            return;
-        }
+        if (!guest) return; // update() clears the selection/screen when a guest vanishes
 
         int panelW = 700;
         int panelH = 220;
@@ -533,6 +530,10 @@ public:
 
         drawText("\"" + engine.ui.currentCall.message + "\"", panelX + 20, panelY + 100, font, COLOR_TEXT);
 
+        if (engine.ui.phoneAnswered) {
+            drawText("Call answered. Taking notes...", panelX + 20, panelY + 130, fontSmall, COLOR_SUCCESS);
+        }
+
         drawText("[E / ENTER / ESC] Hang Up", panelX + 20, panelY + panelH - 30, fontSmall, COLOR_TEXT_DIM);
     }
 
@@ -602,7 +603,7 @@ public:
             drawRect(door);
 
             drawText(room_system::getRuleIcon(room->rule), (int)doorX, corridorY - 55, fontSmall, COLOR_ACCENT, true);
-            drawText(room->name, (int)doorX, corridorY + 70, fontSmall,
+            drawText(room->name, (int)doorX, corridorY - 35, fontSmall,
                 room->occupied ? COLOR_DANGER : COLOR_SUCCESS, true);
         }
 

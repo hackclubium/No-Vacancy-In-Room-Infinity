@@ -137,9 +137,9 @@ void updateMovementInput(float deltaTime) {
     if (ks[SDL_SCANCODE_A]) dx -= 1.0f;
     if (ks[SDL_SCANCODE_D]) dx += 1.0f;
 
-    if (dx != 0.0f || dy != 0.0f) {
-        engine.movePlayer(dx, dy, deltaTime, renderer.screenW, renderer.screenH);
-    }
+    // Always call this (even with zero input) so the position stays clamped
+    // to the screen if the window is resized while the player is standing still.
+    engine.movePlayer(dx, dy, deltaTime, renderer.screenW, renderer.screenH);
 }
 
 void mainLoop() {
