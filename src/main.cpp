@@ -43,6 +43,17 @@ bool processInput(SDL_Event& event) {
                     case GameEngine::GameScreen::ALERT_POPUP:
                         engine.handleAlertAction(engine.ui.selectedAlertIndex, "IGNORE");
                         break;
+                    case GameEngine::GameScreen::ROOM_LIST:
+                        if (engine.ui.selectedGuestId >= 0) {
+                            // Came here from Guest Detail via [R]; step back one level
+                            // instead of losing the guest selection.
+                            engine.ui.currentScreen = GameEngine::GameScreen::GUEST_DETAIL;
+                            engine.ui.selectedRoomNumber = -1;
+                            engine.ui.roomNumberInput.clear();
+                        } else {
+                            engine.returnToLobby();
+                        }
+                        break;
                     default:
                         engine.returnToLobby();
                         break;
@@ -157,8 +168,11 @@ bool processInput(SDL_Event& event) {
                     }
                 }
                 
-                // Click phone
-                if (mx >= 350 && mx <= 390 && my >= renderer.screenH - 275 && my <= renderer.screenH - 260) {
+                // Click phone (matches Renderer::drawLobbyScene's phoneX/deskY math)
+                int deskW = renderer.screenW - 250;
+                int phoneX = 50 + (int)(deskW * 0.27f);
+                int deskY = renderer.screenH - 260;
+                if (mx >= phoneX && mx <= phoneX + 40 && my >= deskY - 25 && my <= deskY) {
                     engine.answerPhone();
                 }
             }

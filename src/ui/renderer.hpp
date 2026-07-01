@@ -70,7 +70,9 @@ public:
             SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
             screenW, screenH, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
         if (!window) return false;
-        
+
+        SDL_SetWindowMinimumSize(window, 960, 640);
+
         sdlRenderer = SDL_CreateRenderer(window, -1,
             SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
         if (!sdlRenderer) return false;
@@ -257,50 +259,56 @@ public:
         UIRect deskPanel = {deskX + 20, deskY + 20, deskW - 40, deskH - 30};
         fillRect(deskPanel);
         
-        // Desk items
+        // Desk items - positioned as fractions of deskW so they stay on the
+        // desk instead of drifting off it when the window is resized
+        int monitorX = deskX + (int)(deskW * 0.08f);
+        int phoneX = deskX + (int)(deskW * 0.27f);
+        int keyBoardX = deskX + (int)(deskW * 0.42f);
+        int bellX = deskX + (int)(deskW * 0.66f);
+
         // Computer
         setColor({30, 35, 45, 255});
-        UIRect monitor = {deskX + 100, deskY - 50, 120, 50};
+        UIRect monitor = {monitorX, deskY - 50, 120, 50};
         fillRect(monitor);
         setColor({50, 180, 100, 100});
-        UIRect screen = {deskX + 105, deskY - 45, 110, 40};
+        UIRect screen = {monitorX + 5, deskY - 45, 110, 40};
         fillRect(screen);
-        drawText("HOTEL OS v0.1", deskX + 110, deskY - 38, fontSmall, COLOR_SUCCESS);
-        
+        drawText("HOTEL OS v0.1", monitorX + 10, deskY - 38, fontSmall, COLOR_SUCCESS);
+
         // Phone
         setColor(COLOR_PHONE);
-        UIRect phoneBody = {deskX + 300, deskY - 15, 40, 15};
+        UIRect phoneBody = {phoneX, deskY - 15, 40, 15};
         fillRect(phoneBody);
-        UIRect phoneReceiver = {deskX + 305, deskY - 25, 30, 10};
+        UIRect phoneReceiver = {phoneX + 5, deskY - 25, 30, 10};
         fillRect(phoneReceiver);
-        
+
         // Phone ringing indicator
         if (engine.state.phoneRinging && engine.ui.flash) {
             setColor(COLOR_DANGER);
-            UIRect phoneRing = {deskX + 310, deskY - 35, 20, 10};
+            UIRect phoneRing = {phoneX + 10, deskY - 35, 20, 10};
             fillRect(phoneRing);
-            drawText("RINGING!", deskX + 320, deskY - 50, fontSmall, COLOR_DANGER);
+            drawText("RINGING!", phoneX + 20, deskY - 50, fontSmall, COLOR_DANGER);
         }
-        
+
         // Key board
         setColor(COLOR_KEY_BOARD);
-        UIRect keyBoard = {deskX + 450, deskY - 80, 200, 80};
+        UIRect keyBoard = {keyBoardX, deskY - 80, 200, 80};
         fillRect(keyBoard);
-        
+
         setColor({60, 50, 40, 255});
-        UIRect keyBoardBorder = {deskX + 445, deskY - 85, 210, 90};
+        UIRect keyBoardBorder = {keyBoardX - 5, deskY - 85, 210, 90};
         drawRect(keyBoardBorder);
-        
-        drawText("ROOM KEYS", deskX + 460, deskY - 75, fontSmall, COLOR_TEXT_DIM);
-        
+
+        drawText("ROOM KEYS", keyBoardX + 10, deskY - 75, fontSmall, COLOR_TEXT_DIM);
+
         // Draw key hooks
         for (int i = 0; i < 10; i++) {
-            int kx = deskX + 460 + (i % 5) * 38;
+            int kx = keyBoardX + 10 + (i % 5) * 38;
             int ky = deskY - 55 + (i / 5) * 22;
             setColor(COLOR_ACCENT);
             UIRect hook = {kx, ky, 4, 4};
             fillRect(hook);
-            
+
             int roomNum = i + 1;
             bool occupied = false;
             for (auto& r : engine.state.rooms) {
@@ -312,10 +320,10 @@ public:
                 fillRect(keyTag);
             }
         }
-        
+
         // Bell on desk
         setColor(COLOR_ACCENT);
-        UIRect bell = {deskX + 700, deskY - 20, 20, 20};
+        UIRect bell = {bellX, deskY - 20, 20, 20};
         fillRect(bell);
         
         // Guest waiting area (dots representing guests)
@@ -428,11 +436,11 @@ public:
             if (ry + cellH > screenH - 40) break;
             
             UIColor bgColor = room.occupied ? UIColor{60, 30, 30, 255} : COLOR_BUTTON_BG;
-            if (room.number == engine.ui.selectedRoomNumber) bgColor = COLOR_BUTTON_HOVER;
             if (room.rule != RoomRule::NORMAL) {
                 bgColor = {35, 30, 55, 255};
                 if (room.occupied) bgColor = {55, 25, 55, 255};
             }
+            if (room.number == engine.ui.selectedRoomNumber) bgColor = COLOR_BUTTON_HOVER;
             
             setColor(bgColor);
             UIRect cell = {rx + 2, ry + 2, cellW - 4, cellH - 4};
@@ -676,11 +684,8 @@ public:
         drawText("Guests Served: " + std::to_string(engine.state.guestsServed), panelX + 30, panelY + 30, font, COLOR_SUCCESS);
         drawText("Complaints Handled: " + std::to_string(engine.state.complaintsHandled), panelX + 30, panelY + 65, font, COLOR_TEXT);
         drawText("Rooms Lost: " + std::to_string(engine.state.roomsLost), panelX + 30, panelY + 100, font, COLOR_DANGER);
-        
-        int score = engine.state.guestsServed * 10 + engine.state.complaintsHandled * 5 - engine.state.roomsLost * 20;
-        engine.state.playerScore += score;
-        
-        drawText("Shift Score: " + std::to_string(score), panelX + 30, panelY + 145, font, COLOR_HIGHLIGHT);
+
+        drawText("Shift Score: " + std::to_string(engine.state.lastShiftScore), panelX + 30, panelY + 145, font, COLOR_HIGHLIGHT);
         drawText("Total Score: " + std::to_string(engine.state.playerScore), panelX + 30, panelY + 175, font, COLOR_HIGHLIGHT);
         
         setColor(COLOR_BUTTON_BG);

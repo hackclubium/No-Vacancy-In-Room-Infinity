@@ -155,6 +155,7 @@ struct GameState {
     float guestSpawnTimer = 0.0f;
     float guestSpawnInterval = 15.0f;
     float phoneRingTimer = 0.0f;
+    float phoneRingElapsed = 0.0f;
     float alertTimer = 0.0f;
     bool phoneRinging = false;
     bool inspectorPresent = false;
@@ -162,4 +163,5 @@ struct GameState {
     int guestsServed = 0;
     int complaintsHandled = 0;
     int roomsLost = 0;
+    int lastShiftScore = 0;
 };

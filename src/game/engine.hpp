@@ -101,6 +101,7 @@ public:
         
         spawnGuests(deltaTime);
         triggerPhoneCalls(deltaTime);
+        updatePhoneRinging(deltaTime);
         triggerAlerts(deltaTime);
         updateAlerts(deltaTime);
         
@@ -135,17 +136,33 @@ public:
     
     void triggerPhoneCalls(float deltaTime) {
         if (ui.currentScreen == GameScreen::PHONE_CALL) return;
-        
+
         state.phoneRingTimer -= deltaTime;
         if (state.phoneRingTimer <= 0.0f && !state.phoneRinging) {
             state.phoneRinging = true;
+            state.phoneRingElapsed = 0.0f;
             state.phoneCalls.push_back(phone_system::generatePhoneCall(state));
             hotel_manager::logEvent(state, "The phone is ringing...");
             ui.statusMessage = "RING RING... The phone is ringing!";
             ui.statusTimer = 5.0f;
         }
     }
-    
+
+    void updatePhoneRinging(float deltaTime) {
+        if (!state.phoneRinging) return;
+
+        state.phoneRingElapsed += deltaTime;
+        if (state.phoneRingElapsed > 20.0f) {
+            state.phoneRinging = false;
+            state.phoneRingElapsed = 0.0f;
+            state.phoneCalls.clear();
+            state.phoneRingTimer = std::uniform_real_distribution<float>(10.0f, 20.0f)(rng);
+            hotel_manager::logEvent(state, "The phone stopped ringing. Missed call.");
+            ui.statusMessage = "You missed a call...";
+            ui.statusTimer = 3.0f;
+        }
+    }
+
     void triggerAlerts(float deltaTime) {
         state.alertTimer -= deltaTime;
         if (state.alertTimer <= 0.0f) {
@@ -207,18 +224,25 @@ public:
     }
     
     void endShift() {
+        int score = state.guestsServed * 10 + state.complaintsHandled * 5 - state.roomsLost * 20;
+        state.lastShiftScore = score;
+        state.playerScore += score;
+
         hotel_manager::logEvent(state, "=== SHIFT " + std::to_string(state.dayNumber) + " ENDED ===");
         hotel_manager::logEvent(state, "Guests served: " + std::to_string(state.guestsServed));
         hotel_manager::logEvent(state, "Complaints handled: " + std::to_string(state.complaintsHandled));
         hotel_manager::logEvent(state, "Rooms lost: " + std::to_string(state.roomsLost));
-        
+
         ui.currentScreen = GameScreen::END_OF_DAY;
     }
-    
+
     void nextDay() {
         state.dayNumber++;
         state.shiftTimer = 300.0f;
-        
+        state.guestsServed = 0;
+        state.complaintsHandled = 0;
+        state.roomsLost = 0;
+
         for (auto& room : state.rooms) {
             if (room.occupied) {
                 room.anomalyLevel += 0.5f;
@@ -232,9 +256,9 @@ public:
             staff.taskTimer = 0.0f;
             staff.currentTask = "";
         }
-        
+
         state.activeAlerts.clear();
-        
+
         ui.currentScreen = GameScreen::LOBBY;
         hotel_manager::logEvent(state, "=== SHIFT " + std::to_string(state.dayNumber) + " STARTED ===");
         hotel_manager::logEvent(state, "The hotel seems slightly more... wrong than yesterday.");
@@ -242,10 +266,12 @@ public:
     
     void answerPhone() {
         if (!state.phoneRinging || state.phoneCalls.empty()) return;
-        
-        PhoneCall& call = state.phoneCalls.back();
+
+        PhoneCall call = state.phoneCalls.back();
         call.answered = true;
+        state.phoneCalls.clear();
         state.phoneRinging = false;
+        state.phoneRingElapsed = 0.0f;
         ui.currentCall = call;
         ui.phoneAnswered = true;
         ui.currentScreen = GameScreen::PHONE_CALL;

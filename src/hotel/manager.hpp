@@ -82,28 +82,25 @@ inline std::vector<Room*> getAvailableRooms(GameState& state) {
 }
 
 inline bool assignRoom(GameState& state, Guest& guest, int roomNumber) {
-    if (roomNumber == 0) {
-        logEvent(state, guest.name + " booked Room 0. I hope they're not expecting to actually GO there.");
-        guest.assignedRoom = 0;
-        guest.checkedIn = true;
-        return true;
-    }
-    
     Room* room = findRoom(state, roomNumber);
     if (!room || room->occupied) {
         return false;
     }
-    
+
     guest.assignedRoom = roomNumber;
     guest.checkedIn = true;
     room->occupied = true;
     room->guestId = guest.id;
     room->timesUsed++;
     room->anomalyLevel += 0.1f;
-    
+
     std::string ruleName = room_system::getRuleName(room->rule);
     logEvent(state, guest.name + " checked into " + room->name + " (" + ruleName + ")");
-    
+
+    if (roomNumber == 0) {
+        logEvent(state, guest.name + " booked Room 0. I hope they're not expecting to actually GO there.");
+    }
+
     if (room->rule == RoomRule::DOES_NOT_EXIST && guest.type == GuestType::GHOST) {
         logEvent(state, "The ghost seems... quite happy with Room 0. It's the only room that matches their state of existence.");
     }
@@ -366,21 +363,25 @@ inline void updateStaff(GameState& state, float deltaTime) {
 }
 
 inline void updateGuestPatience(GameState& state, float deltaTime) {
-    for (auto& guest : state.waitingGuests) {
+    for (size_t i = 0; i < state.waitingGuests.size(); ) {
+        Guest& guest = state.waitingGuests[i];
         guest.patience -= deltaTime * 0.01f * state.timeSpeed;
-        if (guest.patience < 0.3f && !guest.complained) {
+
+        if (guest.patience < 0.3f && guest.patience > 0.0f && !guest.complained) {
             guest.complained = true;
             guest.mood = GuestMood::ANGRY;
             guest.dialogueLine = "How much longer is this going to take?!";
             logEvent(state, guest.name + " is getting impatient!");
         }
-        if (guest.patience < 0.0f) {
-            guest.patience = 0.0f;
-            guest.mood = GuestMood::FRANTIC;
-            guest.dialogueLine = "That's it! I'm leaving! This hotel is RIDICULOUS!";
+
+        if (guest.patience <= 0.0f) {
             logEvent(state, guest.name + " stormed out! Room lost.");
             state.roomsLost++;
+            state.waitingGuests.erase(state.waitingGuests.begin() + i);
+            continue;
         }
+
+        i++;
     }
 }
 
