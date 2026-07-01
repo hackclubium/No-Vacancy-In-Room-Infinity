@@ -146,6 +146,33 @@ public:
         return w;
     }
 
+    std::vector<std::string> wrapText(const std::string& text, TTF_Font* f, int maxWidth) {
+        std::vector<std::string> lines;
+        std::istringstream iss(text);
+        std::string word, currentLine;
+        while (iss >> word) {
+            std::string candidate = currentLine.empty() ? word : currentLine + " " + word;
+            if (textWidth(candidate, f) > maxWidth && !currentLine.empty()) {
+                lines.push_back(currentLine);
+                currentLine = word;
+            } else {
+                currentLine = candidate;
+            }
+        }
+        if (!currentLine.empty()) lines.push_back(currentLine);
+        if (lines.empty()) lines.push_back("");
+        return lines;
+    }
+
+    // Draws left-aligned wrapped text and returns the total height used.
+    int drawTextWrapped(const std::string& text, int x, int y, TTF_Font* f, const UIColor& color, int maxWidth, int lineHeight) {
+        auto lines = wrapText(text, f, maxWidth);
+        for (size_t i = 0; i < lines.size(); i++) {
+            drawText(lines[i], x, y + (int)i * lineHeight, f, color);
+        }
+        return (int)lines.size() * lineHeight;
+    }
+
     void fillGradient(int x, int y, int w, int h, const UIColor& top, const UIColor& bottom) {
         for (int i = 0; i < h; i++) {
             float t = (float)i / h;
@@ -452,9 +479,30 @@ public:
         if (!guest) return; // update() clears the selection/screen when a guest vanishes
 
         int panelW = 700;
-        int panelH = 220;
         int panelX = screenW / 2 - panelW / 2;
+        int contentW = panelW - 40;
+
+        auto dialogueLines = wrapText("\"" + guest->dialogueLine + "\"", font, contentW);
+        auto requestLines = wrapText("Request: " + guest->request, fontSmall, contentW);
+        std::vector<std::string> specialLines;
+        if (!guest->specialNeed.empty()) {
+            specialLines = wrapText("Special: " + guest->specialNeed, fontSmall, contentW);
+        }
+
+        int cursorY = 15;
+        int nameY = cursorY; cursorY += 25;
+        int moodY = cursorY; cursorY += 25;
+        int dialogueY = cursorY; cursorY += (int)dialogueLines.size() * 22 + 8;
+        int requestY = cursorY; cursorY += (int)requestLines.size() * 16 + 4;
+        int specialY = cursorY;
+        if (!specialLines.empty()) cursorY += (int)specialLines.size() * 16 + 4;
+        int statusY = cursorY; cursorY += 22;
+        int complainedY = cursorY;
+        if (guest->complained) cursorY += 20;
+
+        int panelH = cursorY + 35;
         int panelY = screenH - panelH - 40;
+        if (panelY < 75) panelY = 75; // stay clear of the event log docked up top
 
         setColor(COLOR_PANEL_BG);
         UIRect panel = {panelX, panelY, panelW, panelH};
@@ -463,21 +511,21 @@ public:
         drawRect(panel);
 
         drawText(guest->name + "  (" + guest_system::getGuestTypeName(guest->type) + ")",
-            panelX + 20, panelY + 15, font, COLOR_TEXT_BRIGHT);
+            panelX + 20, panelY + nameY, font, COLOR_TEXT_BRIGHT);
         drawText(guest_system::getMoodEmoji(guest->mood) + " " + guest_system::getMoodName(guest->mood),
-            panelX + 20, panelY + 40, fontSmall, COLOR_TEXT);
+            panelX + 20, panelY + moodY, fontSmall, COLOR_TEXT);
 
-        drawText("\"" + guest->dialogueLine + "\"", panelX + 20, panelY + 65, font, COLOR_HIGHLIGHT);
-        drawText("Request: " + guest->request, panelX + 20, panelY + 100, fontSmall, COLOR_TEXT);
+        drawTextWrapped("\"" + guest->dialogueLine + "\"", panelX + 20, panelY + dialogueY, font, COLOR_HIGHLIGHT, contentW, 22);
+        drawTextWrapped("Request: " + guest->request, panelX + 20, panelY + requestY, fontSmall, COLOR_TEXT, contentW, 16);
 
-        if (!guest->specialNeed.empty()) {
-            drawText("Special: " + guest->specialNeed, panelX + 20, panelY + 118, fontSmall, COLOR_ACCENT2);
+        if (!specialLines.empty()) {
+            drawTextWrapped("Special: " + guest->specialNeed, panelX + 20, panelY + specialY, fontSmall, COLOR_ACCENT2, contentW, 16);
         }
 
         if (guest->checkedIn) {
-            drawText("ROOM: " + std::to_string(guest->assignedRoom), panelX + 20, panelY + 145, font, COLOR_SUCCESS);
+            drawText("ROOM: " + std::to_string(guest->assignedRoom), panelX + 20, panelY + statusY, font, COLOR_SUCCESS);
         } else {
-            drawText("Selected - walk to the elevator to assign a room", panelX + 20, panelY + 145, fontSmall, COLOR_ACCENT);
+            drawText("Selected - walk to the elevator to assign a room", panelX + 20, panelY + statusY, fontSmall, COLOR_ACCENT);
         }
 
         if (guest->patience < 1.0f) {
@@ -498,7 +546,7 @@ public:
         }
 
         if (guest->complained) {
-            drawText("Has complained! Handle with care.", panelX + 20, panelY + 170, fontSmall, COLOR_DANGER);
+            drawText("Has complained! Handle with care.", panelX + 20, panelY + complainedY, fontSmall, COLOR_DANGER);
         }
 
         drawText("[E / ESC] Close", panelX + panelW - 140, panelY + panelH - 25, fontSmall, COLOR_TEXT_DIM);
@@ -508,9 +556,24 @@ public:
         drawDimOverlay();
 
         int panelW = 600;
-        int panelH = 220;
         int panelX = screenW / 2 - panelW / 2;
+        int contentW = panelW - 40;
+
+        auto messageLines = wrapText("\"" + engine.ui.currentCall.message + "\"", font, contentW);
+
+        int cursorY = 15;
+        int titleY = cursorY; cursorY += 30;
+        int callerY = cursorY; cursorY += 20;
+        int fromRoomY = cursorY;
+        if (engine.ui.currentCall.fromRoom > 0) cursorY += 20;
+        cursorY += 15;
+        int messageY = cursorY; cursorY += (int)messageLines.size() * 22 + 10;
+        int answeredY = cursorY;
+        if (engine.ui.phoneAnswered) cursorY += 20;
+
+        int panelH = cursorY + 40;
         int panelY = screenH - panelH - 40;
+        if (panelY < 75) panelY = 75;
 
         setColor({30, 25, 40, 255});
         UIRect panel = {panelX, panelY, panelW, panelH};
@@ -518,20 +581,20 @@ public:
         setColor(COLOR_PANEL_BORDER);
         drawRect(panel);
 
-        drawText("INCOMING CALL", panelX + 20, panelY + 15, font, COLOR_TEXT_BRIGHT);
-        drawText("CALLER: " + engine.ui.currentCall.callerName, panelX + 20, panelY + 45, fontSmall, COLOR_HIGHLIGHT);
+        drawText("INCOMING CALL", panelX + 20, panelY + titleY, font, COLOR_TEXT_BRIGHT);
+        drawText("CALLER: " + engine.ui.currentCall.callerName, panelX + 20, panelY + callerY, fontSmall, COLOR_HIGHLIGHT);
 
         if (engine.ui.currentCall.fromRoom > 0) {
-            drawText("From Room: " + std::to_string(engine.ui.currentCall.fromRoom), panelX + 20, panelY + 65, fontSmall, COLOR_ACCENT2);
+            drawText("From Room: " + std::to_string(engine.ui.currentCall.fromRoom), panelX + 20, panelY + fromRoomY, fontSmall, COLOR_ACCENT2);
         }
         if (engine.ui.currentCall.urgent) {
-            drawText("URGENT", panelX + panelW - 100, panelY + 45, fontSmall, COLOR_DANGER);
+            drawText("URGENT", panelX + panelW - 100, panelY + callerY, fontSmall, COLOR_DANGER);
         }
 
-        drawText("\"" + engine.ui.currentCall.message + "\"", panelX + 20, panelY + 100, font, COLOR_TEXT);
+        drawTextWrapped("\"" + engine.ui.currentCall.message + "\"", panelX + 20, panelY + messageY, font, COLOR_TEXT, contentW, 22);
 
         if (engine.ui.phoneAnswered) {
-            drawText("Call answered. Taking notes...", panelX + 20, panelY + 130, fontSmall, COLOR_SUCCESS);
+            drawText("Call answered. Taking notes...", panelX + 20, panelY + answeredY, fontSmall, COLOR_SUCCESS);
         }
 
         drawText("[E / ENTER / ESC] Hang Up", panelX + 20, panelY + panelH - 30, fontSmall, COLOR_TEXT_DIM);
@@ -657,24 +720,33 @@ public:
         int panelX = screenW/2 - 300;
         int panelY = 100;
 
+        int panelW = 600;
+        int contentW = panelW - 60;
+        auto messageLines = wrapText(alert.message, font, contentW);
+        int messageH = (int)messageLines.size() * 26;
+
         setColor({40, 20, 20, 255});
-        UIRect panel = {panelX, panelY, 600, 350};
+        UIRect panel = {panelX, panelY, panelW, 350};
         fillRect(panel);
         setColor(COLOR_DANGER);
         drawRect(panel);
 
-        drawText(alert.message, panelX + 30, panelY + 30, font, COLOR_TEXT_BRIGHT);
+        drawTextWrapped(alert.message, panelX + 30, panelY + 30, font, COLOR_TEXT_BRIGHT, contentW, 26);
 
+        int infoY = panelY + 30 + messageH + 10;
         if (alert.relatedRoom > 0) {
-            drawText("Room: " + std::to_string(alert.relatedRoom), panelX + 30, panelY + 70, fontSmall, COLOR_ACCENT2);
+            drawText("Room: " + std::to_string(alert.relatedRoom), panelX + 30, infoY, fontSmall, COLOR_ACCENT2);
+            infoY += 25;
         }
 
         char timeBuf[32];
         snprintf(timeBuf, sizeof(timeBuf), "Time to resolve: %.0fs", alert.timeLeft);
         UIColor timeColor = alert.timeLeft < 10.0f ? COLOR_DANGER : COLOR_WARN;
-        drawText(timeBuf, panelX + 30, panelY + 95, fontSmall, timeColor);
+        drawText(timeBuf, panelX + 30, infoY, fontSmall, timeColor);
 
-        // Action buttons
+        // Action buttons - anchored to the bottom of the panel so a long,
+        // wrapped message never runs into them.
+        int actionsY = panelY + 350 - 200;
         struct { std::string label; std::string action; int yOff; } actions[] = {
             {"[1] Send Security", "SEND_SECURITY", 0},
             {"[2] Send Maintenance", "SEND_MAINTENANCE", 45},
@@ -684,17 +756,17 @@ public:
 
         for (auto& act : actions) {
             setColor(COLOR_BUTTON_BG);
-            UIRect btn = {panelX + 30, panelY + 140 + act.yOff, 250, 35};
+            UIRect btn = {panelX + 30, actionsY + act.yOff, 250, 35};
             fillRect(btn);
             setColor(COLOR_PANEL_BORDER);
             drawRect(btn);
-            drawText(act.label, panelX + 40, panelY + 148 + act.yOff, fontSmall, COLOR_TEXT);
+            drawText(act.label, panelX + 40, actionsY + 8 + act.yOff, fontSmall, COLOR_TEXT);
         }
 
         drawText("Unhandled alerts: " + std::to_string(
             std::count_if(engine.state.activeAlerts.begin(), engine.state.activeAlerts.end(),
                 [](const Alert& a) { return !a.handled; })
-        ), panelX + 30, panelY + 320, fontSmall, COLOR_TEXT_DIM);
+        ), panelX + 30, actionsY + 180, fontSmall, COLOR_TEXT_DIM);
     }
 
     void drawEndOfDay(GameEngine& engine) {
@@ -780,6 +852,20 @@ public:
         int logY = 70;
         int logW = 320;
         int logH = 14 + MAX_LINES * 16;
+        int contentW = logW - 20;
+
+        // Walk backward from the newest entry, word-wrapping each one to fit
+        // the panel width, until the fixed line budget is used up.
+        std::vector<std::vector<std::string>> wrappedEntries;
+        int totalLines = 0;
+        for (int i = (int)engine.state.eventLog.size() - 1; i >= 0 && totalLines < MAX_LINES; i--) {
+            auto lines = wrapText(engine.state.eventLog[i], fontSmall, contentW);
+            int remaining = MAX_LINES - totalLines;
+            if ((int)lines.size() > remaining) lines.resize(remaining);
+            wrappedEntries.push_back(lines);
+            totalLines += (int)lines.size();
+        }
+        std::reverse(wrappedEntries.begin(), wrappedEntries.end());
 
         setColor({15, 12, 22, 180});
         UIRect logPanel = {logX, logY, logW, logH};
@@ -789,10 +875,12 @@ public:
 
         drawText("EVENT LOG", logX + 10, logY - 18, fontSmall, COLOR_TEXT_DIM);
 
-        int startIdx = std::max(0, (int)engine.state.eventLog.size() - MAX_LINES);
-        for (int i = startIdx; i < (int)engine.state.eventLog.size(); i++) {
-            int lineY = logY + 8 + (i - startIdx) * 16;
-            drawText(engine.state.eventLog[i], logX + 10, lineY, fontSmall, COLOR_TEXT_DIM);
+        int lineY = logY + 8;
+        for (auto& entryLines : wrappedEntries) {
+            for (auto& line : entryLines) {
+                drawText(line, logX + 10, lineY, fontSmall, COLOR_TEXT_DIM);
+                lineY += 16;
+            }
         }
     }
 
