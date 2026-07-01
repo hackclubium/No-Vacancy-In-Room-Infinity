@@ -1,0 +1,78 @@
+name: Build and Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.45
+
+      - name: Install native dependencies (for font fallback)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-dejavu-core
+
+      - name: Copy system font
+        run: |
+          mkdir -p assets
+          cp /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf assets/DejaVuSans.ttf || true
+          cp /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf assets/DejaVuSansMono.ttf || true
+
+      - name: Create build directory
+        run: mkdir build
+
+      - name: Configure CMake
+        run: |
+          cd build
+          emcmake cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_FLAGS="-O3 -sUSE_SDL=2 -sUSE_SDL_TTF=2 -sALLOW_MEMORY_GROWTH=1 -sWASM=1"
+
+      - name: Build
+        run: cd build && emmake make -j$(nproc)
+
+      - name: Prepare deploy directory
+        run: |
+          mkdir deploy
+          cp build/no_vacancy.html deploy/index.html 2>/dev/null || true
+          cp build/no_vacancy.js deploy/ 2>/dev/null || true
+          cp build/no_vacancy.wasm deploy/ 2>/dev/null || true
+          cp build/no_vacancy.data deploy/ 2>/dev/null || true
+          mkdir -p deploy/assets
+          cp assets/*.ttf deploy/assets/ 2>/dev/null || true
+          cp shell.html deploy/original.html 2>/dev/null || true
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: deploy
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

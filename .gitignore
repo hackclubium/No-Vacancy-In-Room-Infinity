@@ -1,0 +1,5 @@
+build/
+build_native/
+*.o
+*.obj
+*.exe
