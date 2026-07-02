@@ -10,6 +10,8 @@
 #include <sstream>
 #include <iomanip>
 #include <cstdio>
+#include <cstdlib>
+#include <cmath>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -28,28 +30,51 @@ struct UIColor {
 namespace ui_renderer {
 
 // Color palette - moody hotel vibe
-const UIColor COLOR_BG         = {20, 16, 28, 255};
-const UIColor COLOR_PANEL_BG   = {28, 24, 38, 255};
-const UIColor COLOR_PANEL_BORDER = {60, 50, 80, 255};
-const UIColor COLOR_TEXT       = {220, 210, 200, 255};
-const UIColor COLOR_TEXT_DIM   = {140, 130, 120, 255};
-const UIColor COLOR_TEXT_BRIGHT = {255, 248, 235, 255};
-const UIColor COLOR_ACCENT     = {180, 150, 90, 255};
-const UIColor COLOR_ACCENT2    = {120, 100, 180, 255};
-const UIColor COLOR_WARN       = {210, 130, 50, 255};
-const UIColor COLOR_DANGER     = {210, 60, 50, 255};
-const UIColor COLOR_SUCCESS    = {90, 170, 100, 255};
-const UIColor COLOR_HIGHLIGHT  = {200, 180, 100, 255};
-const UIColor COLOR_BUTTON_BG  = {45, 40, 60, 255};
-const UIColor COLOR_BUTTON_HOVER = {65, 55, 85, 255};
-const UIColor COLOR_LOBBY_FLOOR = {35, 28, 45, 255};
-const UIColor COLOR_DESK       = {55, 40, 30, 255};
-const UIColor COLOR_ELEVATOR   = {50, 50, 60, 255};
-const UIColor COLOR_KEY_BOARD  = {45, 35, 25, 255};
-const UIColor COLOR_GUEST_PH   = {80, 70, 90, 255};
-const UIColor COLOR_PHONE      = {40, 35, 30, 255};
-const UIColor COLOR_PLAYER     = {230, 195, 110, 255};
-const UIColor COLOR_DOOR       = {70, 55, 45, 255};
+const UIColor COLOR_BG         = {16, 13, 24, 255};
+const UIColor COLOR_PANEL_BG   = {32, 27, 46, 255};
+const UIColor COLOR_PANEL_BORDER = {92, 76, 122, 255};
+const UIColor COLOR_TEXT       = {222, 212, 202, 255};
+const UIColor COLOR_TEXT_DIM   = {148, 137, 128, 255};
+const UIColor COLOR_TEXT_BRIGHT = {255, 250, 238, 255};
+const UIColor COLOR_ACCENT     = {214, 174, 98, 255};
+const UIColor COLOR_ACCENT2    = {150, 124, 216, 255};
+const UIColor COLOR_WARN       = {230, 149, 60, 255};
+const UIColor COLOR_DANGER     = {226, 74, 66, 255};
+const UIColor COLOR_SUCCESS    = {104, 193, 124, 255};
+const UIColor COLOR_HIGHLIGHT  = {226, 200, 122, 255};
+const UIColor COLOR_BUTTON_BG  = {50, 44, 68, 255};
+const UIColor COLOR_BUTTON_HOVER = {74, 63, 98, 255};
+const UIColor COLOR_LOBBY_FLOOR = {38, 30, 50, 255};
+const UIColor COLOR_DESK       = {60, 44, 33, 255};
+const UIColor COLOR_ELEVATOR   = {54, 54, 66, 255};
+const UIColor COLOR_KEY_BOARD  = {49, 38, 27, 255};
+const UIColor COLOR_GUEST_PH   = {84, 74, 96, 255};
+const UIColor COLOR_PHONE      = {44, 38, 32, 255};
+const UIColor COLOR_PLAYER     = {236, 201, 117, 255};
+const UIColor COLOR_DOOR       = {76, 60, 49, 255};
+const UIColor COLOR_SHADOW     = {4, 3, 8, 100};
+
+inline UIColor getGuestSilhouetteColor(GuestType type) {
+    switch (type) {
+        case GuestType::VAMPIRE:          return {72, 38, 52, 255};
+        case GuestType::GHOST:            return {150, 160, 182, 150};
+        case GuestType::TIME_TRAVELER:    return {84, 108, 132, 255};
+        case GuestType::DOPPELGANGER:     return {112, 90, 112, 255};
+        case GuestType::FAE:              return {88, 132, 100, 255};
+        case GuestType::SHADOW_PERSON:    return {24, 21, 30, 255};
+        case GuestType::BLOB:             return {66, 132, 92, 255};
+        case GuestType::JUST_REALLY_WEIRD:return {142, 100, 152, 255};
+        case GuestType::INSPECTOR:        return {96, 96, 108, 255};
+        default:                          return COLOR_GUEST_PH;
+    }
+}
+
+inline UIColor getImpressionColor(RoomRule rule) {
+    int score = room_system::getRoomImpressionScore(rule);
+    if (score > 0) return COLOR_SUCCESS;
+    if (score < 0) return COLOR_DANGER;
+    return COLOR_ACCENT;
+}
 
 class Renderer {
 public:
@@ -63,6 +88,27 @@ public:
     int screenH = 720;
 
     int tick = 0;
+
+    // Juice state: screen shake, particles, transitions, alert flash
+    float shakeTimer = 0.0f;
+    float shakeIntensity = 0.0f;
+    int shakeOffsetXi = 0;
+    int shakeOffsetYi = 0;
+    float transitionAlpha = 1.0f;
+    float alertFlashTimer = 0.0f;
+    bool effectsInitialized = false;
+    GameEngine::GameScreen prevScreen = GameEngine::GameScreen::TITLE;
+    std::vector<bool> prevRoomOccupied;
+    size_t prevAlertCount = 0;
+    int prevRoomsLost = 0;
+
+    struct Particle {
+        float x, y, vx, vy;
+        UIColor color;
+        float lifetime;
+        float maxLifetime;
+    };
+    std::vector<Particle> particles;
 
     bool init() {
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) return false;
@@ -113,17 +159,17 @@ public:
     }
 
     void fillRect(const UIRect& r) {
-        SDL_Rect sr = {r.x, r.y, r.w, r.h};
+        SDL_Rect sr = {r.x + shakeOffsetXi, r.y + shakeOffsetYi, r.w, r.h};
         SDL_RenderFillRect(sdlRenderer, &sr);
     }
 
     void drawRect(const UIRect& r) {
-        SDL_Rect sr = {r.x, r.y, r.w, r.h};
+        SDL_Rect sr = {r.x + shakeOffsetXi, r.y + shakeOffsetYi, r.w, r.h};
         SDL_RenderDrawRect(sdlRenderer, &sr);
     }
 
     void drawLine(int x1, int y1, int x2, int y2) {
-        SDL_RenderDrawLine(sdlRenderer, x1, y1, x2, y2);
+        SDL_RenderDrawLine(sdlRenderer, x1 + shakeOffsetXi, y1 + shakeOffsetYi, x2 + shakeOffsetXi, y2 + shakeOffsetYi);
     }
 
     void drawText(const std::string& text, int x, int y, TTF_Font* f, const UIColor& color, bool center = false) {
@@ -133,7 +179,7 @@ public:
         if (!surf) return;
         SDL_Texture* tex = SDL_CreateTextureFromSurface(sdlRenderer, surf);
         if (!tex) { SDL_FreeSurface(surf); return; }
-        SDL_Rect dst = {center ? x - surf->w/2 : x, y, surf->w, surf->h};
+        SDL_Rect dst = {(center ? x - surf->w/2 : x) + shakeOffsetXi, y + shakeOffsetYi, surf->w, surf->h};
         SDL_RenderCopy(sdlRenderer, tex, NULL, &dst);
         SDL_DestroyTexture(tex);
         SDL_FreeSurface(surf);
@@ -180,8 +226,196 @@ public:
             Uint8 g = (Uint8)(top.g + (bottom.g - top.g) * t);
             Uint8 b = (Uint8)(top.b + (bottom.b - top.b) * t);
             SDL_SetRenderDrawColor(sdlRenderer, r, g, b, 255);
-            SDL_RenderDrawLine(sdlRenderer, x, y + i, x + w, y + i);
+            SDL_RenderDrawLine(sdlRenderer, x + shakeOffsetXi, y + i + shakeOffsetYi, x + w + shakeOffsetXi, y + i + shakeOffsetYi);
         }
+    }
+
+    // === Shapes ===
+
+    void fillCircle(int cx, int cy, int radius, const UIColor& color) {
+        setColor(color);
+        for (int dy = -radius; dy <= radius; dy++) {
+            int dx = (int)std::sqrt((double)std::max(0, radius * radius - dy * dy));
+            drawLine(cx - dx, cy + dy, cx + dx, cy + dy);
+        }
+    }
+
+    void fillRoundedRect(const UIRect& r, int radius, const UIColor& color) {
+        if (radius <= 0 || r.w <= 0 || r.h <= 0) { setColor(color); fillRect(r); return; }
+        radius = std::min(radius, std::min(r.w, r.h) / 2);
+        setColor(color);
+        fillRect({r.x + radius, r.y, r.w - 2 * radius, r.h});
+        fillRect({r.x, r.y + radius, radius, r.h - 2 * radius});
+        fillRect({r.x + r.w - radius, r.y + radius, radius, r.h - 2 * radius});
+        fillCircle(r.x + radius, r.y + radius, radius, color);
+        fillCircle(r.x + r.w - radius - 1, r.y + radius, radius, color);
+        fillCircle(r.x + radius, r.y + r.h - radius - 1, radius, color);
+        fillCircle(r.x + r.w - radius - 1, r.y + r.h - radius - 1, radius, color);
+    }
+
+    void drawPanelShadow(const UIRect& r, int radius = 10, int offset = 6) {
+        fillRoundedRect({r.x + offset, r.y + offset, r.w, r.h}, radius, COLOR_SHADOW);
+    }
+
+    // A rounded panel with a shadow behind it - the standard panel look used everywhere.
+    void drawPanel(const UIRect& r, const UIColor& bg, const UIColor& border, int radius = 12) {
+        drawPanelShadow(r, radius);
+        fillRoundedRect(r, radius, bg);
+        setColor(border);
+        drawRect(r);
+    }
+
+    float bob(float phase, float speed, float amplitude) {
+        return sinf((float)tick * speed + phase) * amplitude;
+    }
+
+    // === Juice: shake / particles / transitions ===
+
+    void triggerShake(float intensity, float duration) {
+        shakeIntensity = intensity;
+        shakeTimer = duration;
+    }
+
+    void spawnBurst(float x, float y, UIColor color, int count = 16) {
+        for (int i = 0; i < count; i++) {
+            float angle = (float)(rand() % 360) * 0.0174533f;
+            float speed = 40.0f + (float)(rand() % 70);
+            Particle p;
+            p.x = x; p.y = y;
+            p.vx = cosf(angle) * speed;
+            p.vy = sinf(angle) * speed - 20.0f;
+            p.color = color;
+            p.lifetime = 0.4f + (float)(rand() % 30) / 100.0f;
+            p.maxLifetime = p.lifetime;
+            particles.push_back(p);
+        }
+    }
+
+    void updateEffects() {
+        const float dt = 0.016f;
+
+        if (shakeTimer > 0.0f) {
+            shakeTimer -= dt;
+            if (shakeTimer > 0.0f) {
+                int amt = std::max(1, (int)shakeIntensity);
+                shakeOffsetXi = (rand() % (amt * 2 + 1)) - amt;
+                shakeOffsetYi = (rand() % (amt * 2 + 1)) - amt;
+            } else {
+                shakeOffsetXi = 0;
+                shakeOffsetYi = 0;
+            }
+        }
+
+        for (auto& p : particles) {
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+            p.vy += 90.0f * dt;
+            p.lifetime -= dt;
+        }
+        particles.erase(std::remove_if(particles.begin(), particles.end(),
+            [](const Particle& p) { return p.lifetime <= 0.0f; }), particles.end());
+
+        if (transitionAlpha > 0.0f) {
+            transitionAlpha -= dt / 0.25f;
+            if (transitionAlpha < 0.0f) transitionAlpha = 0.0f;
+        }
+
+        if (alertFlashTimer > 0.0f) {
+            alertFlashTimer -= dt;
+        }
+    }
+
+    void drawParticles() {
+        for (auto& p : particles) {
+            float t = std::max(0.0f, p.lifetime / p.maxLifetime);
+            UIColor c = p.color;
+            c.a = (Uint8)(220 * t);
+            setColor(c);
+            int size = 3;
+            SDL_Rect sr = {(int)p.x - size / 2, (int)p.y - size / 2, size, size};
+            SDL_RenderFillRect(sdlRenderer, &sr);
+        }
+    }
+
+    void drawTransitionOverlay() {
+        if (transitionAlpha <= 0.0f) return;
+        setColor({6, 5, 10, (Uint8)(transitionAlpha * 255)});
+        SDL_Rect sr = {0, 0, screenW, screenH};
+        SDL_RenderFillRect(sdlRenderer, &sr);
+    }
+
+    void drawAlertFlash() {
+        if (alertFlashTimer <= 0.0f) return;
+        float t = std::min(1.0f, alertFlashTimer / 0.3f);
+        setColor({200, 40, 30, (Uint8)(55 * t)});
+        SDL_Rect sr = {0, 0, screenW, screenH};
+        SDL_RenderFillRect(sdlRenderer, &sr);
+    }
+
+    // GUEST_DETAIL/PHONE_CALL are lightweight overlays drawn on top of the
+    // lobby, not real screen switches - treat them as LOBBY so opening or
+    // closing a dialogue doesn't trigger a jarring fade-to-black every time.
+    GameEngine::GameScreen normalizeForTransition(GameEngine::GameScreen s) {
+        if (s == GameEngine::GameScreen::GUEST_DETAIL || s == GameEngine::GameScreen::PHONE_CALL) {
+            return GameEngine::GameScreen::LOBBY;
+        }
+        return s;
+    }
+
+    void updateScreenTransition(GameEngine::GameScreen current) {
+        if (!effectsInitialized) return; // handled by detectVisualEvents' first-frame init
+        GameEngine::GameScreen normalized = normalizeForTransition(current);
+        if (normalized != prevScreen) {
+            transitionAlpha = 1.0f;
+            prevScreen = normalized;
+        }
+    }
+
+    // Frame-to-frame diffing on plain game state (no engine->renderer coupling
+    // needed) to trigger juice for events the engine doesn't know about visuals.
+    void detectVisualEvents(GameEngine& engine) {
+        if (!effectsInitialized) {
+            prevRoomOccupied.assign(engine.state.rooms.size(), false);
+            for (size_t i = 0; i < engine.state.rooms.size(); i++) {
+                prevRoomOccupied[i] = engine.state.rooms[i].occupied;
+            }
+            prevAlertCount = engine.state.activeAlerts.size();
+            prevRoomsLost = engine.state.roomsLost;
+            prevScreen = normalizeForTransition(engine.ui.currentScreen);
+            effectsInitialized = true;
+            return;
+        }
+
+        if (prevRoomOccupied.size() == engine.state.rooms.size()) {
+            for (size_t i = 0; i < engine.state.rooms.size(); i++) {
+                bool nowOcc = engine.state.rooms[i].occupied;
+                if (nowOcc && !prevRoomOccupied[i] &&
+                    engine.ui.currentScreen == GameEngine::GameScreen::HALLWAY &&
+                    engine.state.rooms[i].floor == engine.state.currentFloor) {
+                    auto doors = room_system::getRoomsOnFloor(engine.state.rooms, engine.state.currentFloor);
+                    for (size_t d = 0; d < doors.size(); d++) {
+                        if (doors[d]->number == engine.state.rooms[i].number) {
+                            float doorX = layout::hallwayDoorX(screenW, (int)d, (int)doors.size());
+                            int corridorY = screenH / 2 + 40;
+                            spawnBurst(doorX, (float)corridorY, COLOR_SUCCESS, 18);
+                            break;
+                        }
+                    }
+                }
+                prevRoomOccupied[i] = nowOcc;
+            }
+        }
+
+        if (engine.state.activeAlerts.size() > prevAlertCount) {
+            triggerShake(4.0f, 0.25f);
+            alertFlashTimer = 0.3f;
+        }
+        prevAlertCount = engine.state.activeAlerts.size();
+
+        if (engine.state.roomsLost > prevRoomsLost) {
+            alertFlashTimer = std::max(alertFlashTimer, 0.25f);
+        }
+        prevRoomsLost = engine.state.roomsLost;
     }
 
     void beginFrame() {
@@ -189,6 +423,7 @@ public:
         SDL_RenderClear(sdlRenderer);
         SDL_GetWindowSize(window, &screenW, &screenH);
         tick++;
+        updateEffects();
     }
 
     void endFrame() {
@@ -196,8 +431,9 @@ public:
     }
 
     void drawPlayerAvatar(float x, float y) {
+        float bobY = bob(0.0f, 0.12f, 1.5f);
         setColor(COLOR_PLAYER);
-        int cx = (int)x, cy = (int)y;
+        int cx = (int)x, cy = (int)(y + bobY);
         UIRect head = {cx - 7, cy - 22, 14, 14};
         fillRect(head);
         UIRect body = {cx - 15, cy - 8, 30, 35};
@@ -208,11 +444,27 @@ public:
         if (prompt.empty()) return;
         int w = textWidth(prompt, fontSmall) + 16;
         UIRect bg = {(int)x - w / 2, (int)y - 45, w, 22};
-        setColor({15, 12, 22, 220});
-        fillRect(bg);
-        setColor(COLOR_ACCENT);
-        drawRect(bg);
+        drawPanel(bg, {15, 12, 22, 220}, COLOR_ACCENT, 8);
         drawText(prompt, (int)x, (int)y - 41, fontSmall, COLOR_TEXT_BRIGHT, true);
+    }
+
+    // A pulsing ring drawn around whatever's currently interactable, at a given screen point.
+    void drawHoverGlow(float px, float py) {
+        float pulse = 0.5f + 0.5f * sinf((float)tick * 0.15f);
+        int radius = 24 + (int)(pulse * 4.0f);
+        UIColor glowColor = {236, 201, 117, (Uint8)(60 + 60 * pulse)};
+        setColor(glowColor);
+        drawRect({(int)px - radius, (int)py - radius, radius * 2, radius * 2});
+        drawRect({(int)px - radius + 3, (int)py - radius + 3, radius * 2 - 6, radius * 2 - 6});
+    }
+
+    void drawRuleBadge(const std::string& icon, int cx, int cy, UIColor color) {
+        int w = textWidth(icon, fontSmall) + 12;
+        int h = 18;
+        fillRoundedRect({cx - w / 2, cy - h / 2, w, h}, 6, {color.r, color.g, color.b, 55});
+        setColor(color);
+        drawRect({cx - w / 2, cy - h / 2, w, h});
+        drawText(icon, cx, cy - 7, fontSmall, color, true);
     }
 
     // === DRAWING FUNCTIONS ===
@@ -250,20 +502,16 @@ public:
         int elevatorH = bottomY - 60;
         int elevatorY = 40;
 
-        setColor(COLOR_ELEVATOR);
-        UIRect elevator = {elevatorX, elevatorY, elevatorW, elevatorH};
-        fillRect(elevator);
+        drawPanelShadow({elevatorX, elevatorY, elevatorW, elevatorH}, 8, 5);
+        fillRoundedRect({elevatorX, elevatorY, elevatorW, elevatorH}, 8, COLOR_ELEVATOR);
 
-        setColor({80, 80, 90, 255});
-        UIRect elevatorInner = {elevatorX + 10, elevatorY + 10, elevatorW - 20, elevatorH - 20};
-        fillRect(elevatorInner);
+        fillRoundedRect({elevatorX + 10, elevatorY + 10, elevatorW - 20, elevatorH - 20}, 4, {80, 80, 90, 255});
 
         // Elevator door line
         setColor(COLOR_ELEVATOR);
         drawLine(elevatorX + elevatorW/2, elevatorY + 10, elevatorX + elevatorW/2, elevatorY + elevatorH - 10);
 
         // Elevator arrow (animated)
-        setColor(COLOR_ACCENT);
         float pulse = 0.5f + 0.5f * sinf(tick * 0.1f);
         int arrowAlpha = (int)(128 + 127 * pulse);
         setColor({180, 150, 90, (Uint8)arrowAlpha});
@@ -282,17 +530,14 @@ public:
         int deskW = layout::deskW(screenW);
         int deskH = 80;
 
-        setColor(COLOR_DESK);
-        UIRect desk = {deskX, deskY, deskW, deskH};
-        fillRect(desk);
+        drawPanelShadow({deskX, deskY, deskW, deskH}, 6, 5);
+        fillRoundedRect({deskX, deskY, deskW, deskH}, 6, COLOR_DESK);
 
         setColor({70, 50, 35, 255});
         UIRect deskTop = {deskX, deskY, deskW, 8};
         fillRect(deskTop);
 
-        setColor({90, 65, 40, 255});
-        UIRect deskPanel = {deskX + 20, deskY + 20, deskW - 40, deskH - 30};
-        fillRect(deskPanel);
+        fillRoundedRect({deskX + 20, deskY + 20, deskW - 40, deskH - 30}, 4, {90, 65, 40, 255});
 
         // Desk items - positioned as fractions of deskW so they stay on the
         // desk instead of drifting off it when the window is resized
@@ -303,20 +548,16 @@ public:
         int bellX = deskX + (int)(deskW * 0.66f);
 
         // Computer
-        setColor({30, 35, 45, 255});
-        UIRect monitor = {monitorX, deskY - 50, 120, 50};
-        fillRect(monitor);
-        setColor({50, 180, 100, 100});
-        UIRect screen = {monitorX + 5, deskY - 45, 110, 40};
-        fillRect(screen);
+        fillRoundedRect({monitorX, deskY - 50, 120, 50}, 5, {30, 35, 45, 255});
+        fillRoundedRect({monitorX + 5, deskY - 45, 110, 40}, 3, {50, 180, 100, 100});
         drawText("HOTEL OS v0.1", monitorX + 10, deskY - 38, fontSmall, COLOR_SUCCESS);
 
         // Phone
         setColor(COLOR_PHONE);
         UIRect phoneBody = {(int)phoneX, deskY - 15, 40, 15};
-        fillRect(phoneBody);
+        fillRoundedRect(phoneBody, 4, COLOR_PHONE);
         UIRect phoneReceiver = {(int)phoneX + 5, deskY - 25, 30, 10};
-        fillRect(phoneReceiver);
+        fillRoundedRect(phoneReceiver, 4, COLOR_PHONE);
 
         // Phone ringing indicator
         if (engine.state.phoneRinging && engine.ui.flash) {
@@ -327,9 +568,7 @@ public:
         }
 
         // Key board
-        setColor(COLOR_KEY_BOARD);
-        UIRect keyBoard = {keyBoardX, deskY - 80, 200, 80};
-        fillRect(keyBoard);
+        fillRoundedRect({keyBoardX, deskY - 80, 200, 80}, 5, COLOR_KEY_BOARD);
 
         setColor({60, 50, 40, 255});
         UIRect keyBoardBorder = {keyBoardX - 5, deskY - 85, 210, 90};
@@ -359,8 +598,7 @@ public:
 
         // Bell on desk
         setColor(COLOR_ACCENT);
-        UIRect bell = {bellX, deskY - 20, 20, 20};
-        fillRect(bell);
+        fillCircle(bellX + 10, deskY - 10, 10, COLOR_ACCENT);
 
         // Guest waiting area (dots representing guests)
         float guestAreaX = layout::guestAreaX();
@@ -368,13 +606,21 @@ public:
 
         drawText("QUEUE", (int)guestAreaX, (int)guestAreaY - 20, fontSmall, COLOR_TEXT_DIM);
 
+        NearbyInteraction near = engine.getNearbyInteraction(screenW, screenH);
+
         for (size_t i = 0; i < engine.state.waitingGuests.size() && i < 6; i++) {
             auto& guest = engine.state.waitingGuests[i];
+            float guestBob = bob((float)i * 1.7f, 0.05f, 2.0f);
             int gx = (int)layout::guestSlotX(screenW, (int)i);
-            int gy = (int)guestAreaY;
+            int gy = (int)(guestAreaY + guestBob);
 
-            // Silhouette
-            setColor(COLOR_GUEST_PH);
+            if (near.type == InteractionType::GUEST && near.targetId == guest.id) {
+                drawHoverGlow((float)gx + 15.0f, (float)gy + 25.0f);
+            }
+
+            // Silhouette (tinted by guest type)
+            UIColor silColor = getGuestSilhouetteColor(guest.type);
+            setColor(silColor);
             UIRect head = {gx + 8, gy, 14, 14};
             fillRect(head);
             UIRect body = {gx, gy + 15, 30, 35};
@@ -403,6 +649,12 @@ public:
             }
         }
 
+        if (near.type == InteractionType::PHONE) {
+            drawHoverGlow(phoneX + 20.0f, layout::interactLineY(screenH));
+        } else if (near.type == InteractionType::ELEVATOR) {
+            drawHoverGlow(layout::elevatorInteractX(screenW), layout::interactLineY(screenH));
+        }
+
         // Staff indicators
         int staffStartX = screenW - 230;
         int staffStartY = screenH - 80;
@@ -415,9 +667,7 @@ public:
             int sy = staffStartY + (i / 3) * 45;
 
             UIColor staffColor = staff.available ? COLOR_SUCCESS : COLOR_WARN;
-            setColor(staffColor);
-            UIRect staffDot = {sx, sy, 12, 12};
-            fillRect(staffDot);
+            fillCircle(sx + 6, sy + 6, 6, staffColor);
 
             drawText(staff.name.substr(0, 5), sx + 16, sy - 2, fontSmall, COLOR_TEXT_DIM);
             drawText(hotel_manager::getStaffName(staff.type), sx + 16, sy + 12, fontSmall, COLOR_TEXT_DIM);
@@ -428,7 +678,6 @@ public:
         }
 
         // Player avatar + nearby interaction prompt
-        NearbyInteraction near = engine.getNearbyInteraction(screenW, screenH);
         drawInteractPrompt(near.prompt, engine.state.playerX, engine.state.playerY);
         drawPlayerAvatar(engine.state.playerX, engine.state.playerY);
 
@@ -504,11 +753,7 @@ public:
         int panelY = screenH - panelH - 40;
         if (panelY < 75) panelY = 75; // stay clear of the event log docked up top
 
-        setColor(COLOR_PANEL_BG);
-        UIRect panel = {panelX, panelY, panelW, panelH};
-        fillRect(panel);
-        setColor(COLOR_PANEL_BORDER);
-        drawRect(panel);
+        drawPanel({panelX, panelY, panelW, panelH}, COLOR_PANEL_BG, COLOR_PANEL_BORDER);
 
         drawText(guest->name + "  (" + guest_system::getGuestTypeName(guest->type) + ")",
             panelX + 20, panelY + nameY, font, COLOR_TEXT_BRIGHT);
@@ -534,15 +779,11 @@ public:
             int patBarW = 180;
             int patBarH = 16;
 
-            setColor(COLOR_BUTTON_BG);
-            UIRect patBg = {patBarX, patBarY, patBarW, patBarH};
-            fillRect(patBg);
+            fillRoundedRect({patBarX, patBarY, patBarW, patBarH}, 4, COLOR_BUTTON_BG);
 
             UIColor patColor = guest->patience > 0.5f ? COLOR_SUCCESS :
                                guest->patience > 0.2f ? COLOR_WARN : COLOR_DANGER;
-            setColor(patColor);
-            UIRect patBar = {patBarX, patBarY, (int)(patBarW * guest->patience), patBarH};
-            fillRect(patBar);
+            fillRoundedRect({patBarX, patBarY, (int)(patBarW * guest->patience), patBarH}, 4, patColor);
         }
 
         if (guest->complained) {
@@ -575,11 +816,7 @@ public:
         int panelY = screenH - panelH - 40;
         if (panelY < 75) panelY = 75;
 
-        setColor({30, 25, 40, 255});
-        UIRect panel = {panelX, panelY, panelW, panelH};
-        fillRect(panel);
-        setColor(COLOR_PANEL_BORDER);
-        drawRect(panel);
+        drawPanel({panelX, panelY, panelW, panelH}, {34, 28, 44, 255}, COLOR_PANEL_BORDER);
 
         drawText("INCOMING CALL", panelX + 20, panelY + titleY, font, COLOR_TEXT_BRIGHT);
         drawText("CALLER: " + engine.ui.currentCall.callerName, panelX + 20, panelY + callerY, fontSmall, COLOR_HIGHLIGHT);
@@ -616,9 +853,15 @@ public:
             int ry = startY + (int)i * rowH;
             bool selected = ((int)i == engine.state.elevatorMenuIndex);
 
-            setColor(selected ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG);
             UIRect row = {panelX, ry, panelW, rowH - 6};
-            fillRect(row);
+            if (selected) {
+                float pulse = 0.5f + 0.5f * sinf((float)tick * 0.15f);
+                UIColor c = COLOR_BUTTON_HOVER;
+                c.r = (Uint8)std::min(255.0f, c.r + pulse * 20.0f);
+                fillRoundedRect(row, 8, c);
+            } else {
+                fillRoundedRect(row, 8, COLOR_BUTTON_BG);
+            }
             setColor(COLOR_PANEL_BORDER);
             drawRect(row);
 
@@ -643,10 +886,14 @@ public:
         setColor(COLOR_PANEL_BORDER);
         drawLine(0, corridorY + 60, screenW, corridorY + 60);
 
+        NearbyInteraction near = engine.getNearbyInteraction(screenW, screenH);
+
         // Elevator at the left edge
-        setColor(COLOR_ELEVATOR);
-        UIRect elevatorDoor = {(int)layout::hallwayElevatorX() - 30, corridorY - 70, 60, 130};
-        fillRect(elevatorDoor);
+        if (near.type == InteractionType::HALLWAY_ELEVATOR) {
+            drawHoverGlow(layout::hallwayElevatorX(), (float)(corridorY + 60));
+        }
+        drawPanelShadow({(int)layout::hallwayElevatorX() - 30, corridorY - 70, 60, 130}, 6, 4);
+        fillRoundedRect({(int)layout::hallwayElevatorX() - 30, corridorY - 70, 60, 130}, 6, COLOR_ELEVATOR);
         drawText("ELEVATOR", (int)layout::hallwayElevatorX(), corridorY - 90, fontSmall, COLOR_TEXT_DIM, true);
 
         auto doors = room_system::getRoomsOnFloor(engine.state.rooms, engine.state.currentFloor);
@@ -660,18 +907,24 @@ public:
             if (room->rule != RoomRule::NORMAL && room->occupied) doorColor = {55, 25, 55, 255};
             if (!room->occupied && (!room->isClean || room->needsMaintenance)) doorColor = {50, 45, 35, 255};
 
-            setColor(doorColor);
+            if (near.type == InteractionType::DOOR && near.targetId == room->number) {
+                drawHoverGlow(doorX, (float)(corridorY + 60));
+            }
+
             UIRect door = {(int)doorX - 25, corridorY - 60, 50, 120};
-            fillRect(door);
+            drawPanelShadow(door, 5, 3);
+            fillRoundedRect(door, 5, doorColor);
             setColor(COLOR_PANEL_BORDER);
             drawRect(door);
 
-            drawText(room_system::getRuleIcon(room->rule), (int)doorX, corridorY - 55, fontSmall, COLOR_ACCENT, true);
+            // Door handle
+            fillCircle((int)doorX + 16, corridorY, 2, COLOR_ACCENT);
+
+            drawRuleBadge(room_system::getRuleIcon(room->rule), (int)doorX, corridorY - 55, getImpressionColor(room->rule));
             drawText(room->name, (int)doorX, corridorY - 35, fontSmall,
                 room->occupied ? COLOR_DANGER : COLOR_SUCCESS, true);
         }
 
-        NearbyInteraction near = engine.getNearbyInteraction(screenW, screenH);
         drawInteractPrompt(near.prompt, engine.state.hallwayPlayerX, (float)(corridorY + 60));
         drawPlayerAvatar(engine.state.hallwayPlayerX, (float)(corridorY + 60));
 
@@ -681,11 +934,7 @@ public:
             if (sel) {
                 int infoY = screenH - 130;
                 int infoX = screenW / 2 - 350;
-                setColor(COLOR_PANEL_BG);
-                UIRect infoPanel = {infoX, infoY, 700, 100};
-                fillRect(infoPanel);
-                setColor(COLOR_PANEL_BORDER);
-                drawRect(infoPanel);
+                drawPanel({infoX, infoY, 700, 100}, COLOR_PANEL_BG, COLOR_PANEL_BORDER);
 
                 drawText(sel->name + " (" + room_system::getRuleName(sel->rule) + ")", infoX + 15, infoY + 8, font, COLOR_TEXT_BRIGHT);
                 drawText(room_system::getRuleDescription(sel->rule), infoX + 15, infoY + 32, fontSmall, COLOR_TEXT);
@@ -733,11 +982,7 @@ public:
         auto messageLines = wrapText(alert.message, font, contentW);
         int messageH = (int)messageLines.size() * 26;
 
-        setColor({40, 20, 20, 255});
-        UIRect panel = {panelX, panelY, panelW, 350};
-        fillRect(panel);
-        setColor(COLOR_DANGER);
-        drawRect(panel);
+        drawPanel({panelX, panelY, panelW, 350}, {44, 22, 22, 255}, COLOR_DANGER);
 
         drawTextWrapped(alert.message, panelX + 30, panelY + 30, font, COLOR_TEXT_BRIGHT, contentW, 26);
 
@@ -763,9 +1008,8 @@ public:
         };
 
         for (auto& act : actions) {
-            setColor(COLOR_BUTTON_BG);
             UIRect btn = {panelX + 30, actionsY + act.yOff, 250, 35};
-            fillRect(btn);
+            fillRoundedRect(btn, 6, COLOR_BUTTON_BG);
             setColor(COLOR_PANEL_BORDER);
             drawRect(btn);
             drawText(act.label, panelX + 40, actionsY + 8 + act.yOff, fontSmall, COLOR_TEXT);
@@ -806,11 +1050,7 @@ public:
         int panelH = buttonY + 50;
         int panelY = 200;
 
-        setColor(COLOR_PANEL_BG);
-        UIRect panel = {panelX, panelY, panelW, panelH};
-        fillRect(panel);
-        setColor(COLOR_PANEL_BORDER);
-        drawRect(panel);
+        drawPanel({panelX, panelY, panelW, panelH}, COLOR_PANEL_BG, COLOR_PANEL_BORDER);
 
         drawText("Guests Served: " + std::to_string(engine.state.guestsServed), panelX + 30, panelY + guestsY, font, COLOR_SUCCESS);
         drawText("Complaints Handled: " + std::to_string(engine.state.complaintsHandled), panelX + 30, panelY + complaintsY, font, COLOR_TEXT);
@@ -831,9 +1071,8 @@ public:
             drawText(resultText, panelX + 30, y + 4, fontSmall, resultColor);
         }
 
-        setColor(COLOR_BUTTON_BG);
         UIRect nextBtn = {panelX + 50, panelY + buttonY, panelW - 100, 40};
-        fillRect(nextBtn);
+        fillRoundedRect(nextBtn, 8, COLOR_BUTTON_BG);
         setColor(COLOR_PANEL_BORDER);
         drawRect(nextBtn);
         drawText("[ENTER] Start Next Shift", panelX + 60, panelY + buttonY + 8, font, COLOR_TEXT);
@@ -907,11 +1146,7 @@ public:
         }
         std::reverse(wrappedEntries.begin(), wrappedEntries.end());
 
-        setColor({15, 12, 22, 180});
-        UIRect logPanel = {logX, logY, logW, logH};
-        fillRect(logPanel);
-        setColor(COLOR_PANEL_BORDER);
-        drawRect(logPanel);
+        drawPanel({logX, logY, logW, logH}, {15, 12, 22, 180}, COLOR_PANEL_BORDER, 6);
 
         drawText("EVENT LOG", logX + 10, logY - 18, fontSmall, COLOR_TEXT_DIM);
 
@@ -954,6 +1189,8 @@ public:
 
     void render(GameEngine& engine) {
         beginFrame();
+        detectVisualEvents(engine);
+        updateScreenTransition(engine.ui.currentScreen);
 
         switch (engine.ui.currentScreen) {
             case GameEngine::GameScreen::TITLE:
@@ -988,6 +1225,10 @@ public:
                 drawEndOfDay(engine);
                 break;
         }
+
+        drawParticles();
+        drawAlertFlash();
+        drawTransitionOverlay();
 
         endFrame();
     }
