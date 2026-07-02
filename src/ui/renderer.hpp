@@ -5,6 +5,7 @@
 #include "hotel/guests.hpp"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
+#include <SDL2/SDL_image.h>
 #include <string>
 #include <vector>
 #include <sstream>
@@ -48,25 +49,14 @@ const UIColor COLOR_LOBBY_FLOOR = {38, 30, 50, 255};
 const UIColor COLOR_DESK       = {60, 44, 33, 255};
 const UIColor COLOR_ELEVATOR   = {54, 54, 66, 255};
 const UIColor COLOR_KEY_BOARD  = {49, 38, 27, 255};
-const UIColor COLOR_GUEST_PH   = {84, 74, 96, 255};
 const UIColor COLOR_PHONE      = {44, 38, 32, 255};
 const UIColor COLOR_PLAYER     = {236, 201, 117, 255};
 const UIColor COLOR_DOOR       = {76, 60, 49, 255};
 const UIColor COLOR_SHADOW     = {4, 3, 8, 100};
 
-inline UIColor getGuestSilhouetteColor(GuestType type) {
-    switch (type) {
-        case GuestType::VAMPIRE:          return {72, 38, 52, 255};
-        case GuestType::GHOST:            return {150, 160, 182, 150};
-        case GuestType::TIME_TRAVELER:    return {84, 108, 132, 255};
-        case GuestType::DOPPELGANGER:     return {112, 90, 112, 255};
-        case GuestType::FAE:              return {88, 132, 100, 255};
-        case GuestType::SHADOW_PERSON:    return {24, 21, 30, 255};
-        case GuestType::BLOB:             return {66, 132, 92, 255};
-        case GuestType::JUST_REALLY_WEIRD:return {142, 100, 152, 255};
-        case GuestType::INSPECTOR:        return {96, 96, 108, 255};
-        default:                          return COLOR_GUEST_PH;
-    }
+// Ghosts render see-through; every other guest type is opaque.
+inline Uint8 getGuestSpriteAlpha(GuestType type) {
+    return type == GuestType::GHOST ? 150 : 255;
 }
 
 inline UIColor getImpressionColor(RoomRule rule) {
@@ -93,6 +83,9 @@ public:
     int screenW = 1280;
     int screenH = 720;
 
+    SDL_Texture* playerTexture = nullptr;
+    SDL_Texture* guestTextures[10] = {nullptr};
+
     int tick = 0;
 
     // Juice state: screen shake, particles, transitions, alert flash
@@ -116,9 +109,33 @@ public:
     };
     std::vector<Particle> particles;
 
+    SDL_Texture* loadTexture(const std::string& name) {
+        SDL_Texture* tex = IMG_LoadTexture(sdlRenderer, ("assets/" + name).c_str());
+        if (!tex) tex = IMG_LoadTexture(sdlRenderer, ("/assets/" + name).c_str());
+        if (!tex) SDL_Log("Warning: failed to load sprite '%s': %s", name.c_str(), IMG_GetError());
+        return tex;
+    }
+
+    void loadSprites() {
+        playerTexture = loadTexture("player_clerk.png");
+        guestTextures[(int)GuestType::HUMAN]             = loadTexture("human.png");
+        guestTextures[(int)GuestType::VAMPIRE]            = loadTexture("vampire.png");
+        guestTextures[(int)GuestType::GHOST]              = loadTexture("ghost.png");
+        guestTextures[(int)GuestType::TIME_TRAVELER]      = loadTexture("time_traveler.png");
+        guestTextures[(int)GuestType::DOPPELGANGER]       = loadTexture("doppelganger.png");
+        guestTextures[(int)GuestType::FAE]                = loadTexture("fae.png");
+        guestTextures[(int)GuestType::SHADOW_PERSON]      = loadTexture("shadow_person.png");
+        guestTextures[(int)GuestType::BLOB]               = loadTexture("blob.png");
+        guestTextures[(int)GuestType::JUST_REALLY_WEIRD]  = loadTexture("just_really_weird.png");
+        guestTextures[(int)GuestType::INSPECTOR]          = loadTexture("inspector.png");
+    }
+
     bool init() {
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) return false;
         if (TTF_Init() < 0) return false;
+        if ((IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG) == 0) {
+            SDL_Log("Warning: IMG_Init(PNG) failed: %s", IMG_GetError());
+        }
 
         window = SDL_CreateWindow("No Vacancy in Room Infinity",
             SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
@@ -132,6 +149,8 @@ public:
         if (!sdlRenderer) return false;
 
         SDL_SetRenderDrawBlendMode(sdlRenderer, SDL_BLENDMODE_BLEND);
+
+        loadSprites();
 
         font = TTF_OpenFont("assets/DejaVuSans.ttf", 18);
         if (!font) font = TTF_OpenFont("/assets/DejaVuSans.ttf", 18);
@@ -150,12 +169,17 @@ public:
     }
 
     ~Renderer() {
+        if (playerTexture) SDL_DestroyTexture(playerTexture);
+        for (auto* tex : guestTextures) {
+            if (tex) SDL_DestroyTexture(tex);
+        }
         if (fontTitle) TTF_CloseFont(fontTitle);
         if (fontMono) TTF_CloseFont(fontMono);
         if (fontSmall) TTF_CloseFont(fontSmall);
         if (font) TTF_CloseFont(font);
         if (sdlRenderer) SDL_DestroyRenderer(sdlRenderer);
         if (window) SDL_DestroyWindow(window);
+        IMG_Quit();
         TTF_Quit();
         SDL_Quit();
     }
@@ -261,6 +285,16 @@ public:
 
     void drawPanelShadow(const UIRect& r, int radius = 10, int offset = 6) {
         fillRoundedRect({r.x + offset, r.y + offset, r.w, r.h}, radius, COLOR_SHADOW);
+    }
+
+    // Sprites are 32x56, drawn centered horizontally and anchored so the
+    // character's feet land near (cx, cy) - the same anchor point the old
+    // rect silhouettes used.
+    void drawSprite(SDL_Texture* tex, float cx, float cy, Uint8 alpha = 255) {
+        if (!tex) return;
+        SDL_SetTextureAlphaMod(tex, alpha);
+        SDL_Rect dst = {(int)cx - 16 + shakeOffsetXi, (int)cy - 25 + shakeOffsetYi, 32, 56};
+        SDL_RenderCopy(sdlRenderer, tex, nullptr, &dst);
     }
 
     // A soft warm glow that punches through the dark overlay via additive
@@ -452,12 +486,7 @@ public:
 
     void drawPlayerAvatar(float x, float y) {
         float bobY = bob(0.0f, 0.12f, 1.5f);
-        setColor(COLOR_PLAYER);
-        int cx = (int)x, cy = (int)(y + bobY);
-        UIRect head = {cx - 7, cy - 22, 14, 14};
-        fillRect(head);
-        UIRect body = {cx - 15, cy - 8, 30, 35};
-        fillRect(body);
+        drawSprite(playerTexture, x, y + bobY);
     }
 
     void drawInteractPrompt(const std::string& prompt, float x, float y) {
@@ -638,13 +667,8 @@ public:
                 drawHoverGlow((float)gx + 15.0f, (float)gy + 25.0f);
             }
 
-            // Silhouette (tinted by guest type)
-            UIColor silColor = getGuestSilhouetteColor(guest.type);
-            setColor(silColor);
-            UIRect head = {gx + 8, gy, 14, 14};
-            fillRect(head);
-            UIRect body = {gx, gy + 15, 30, 35};
-            fillRect(body);
+            drawSprite(guestTextures[(int)guest.type], (float)gx + 15.0f, (float)gy + 22.0f,
+                getGuestSpriteAlpha(guest.type));
 
             // Mood indicator
             UIColor moodColor = COLOR_TEXT;
