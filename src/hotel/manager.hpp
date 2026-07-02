@@ -64,13 +64,6 @@ inline Room* findRoomForGuest(GameState& state, int guestId) {
     return nullptr;
 }
 
-inline Staff* findAvailableStaff(GameState& state) {
-    for (auto& s : state.staff) {
-        if (s.available) return &s;
-    }
-    return nullptr;
-}
-
 inline std::vector<Room*> getAvailableRooms(GameState& state) {
     std::vector<Room*> available;
     for (auto& r : state.rooms) {
@@ -357,7 +350,7 @@ inline std::string getDetailedRoomInfo(const Room& room) {
     return oss.str();
 }
 
-inline void sendStaffToRoom(GameState& state, int roomNumber, StaffType type) {
+inline bool sendStaffToRoom(GameState& state, int roomNumber, StaffType type) {
     Staff* staff = nullptr;
     for (auto& s : state.staff) {
         if (s.type == type && s.available) {
@@ -367,7 +360,7 @@ inline void sendStaffToRoom(GameState& state, int roomNumber, StaffType type) {
     }
     if (!staff) {
         logEvent(state, "No available " + getStaffName(type) + "!");
-        return;
+        return false;
     }
     
     staff->available = false;
@@ -384,8 +377,9 @@ inline void sendStaffToRoom(GameState& state, int roomNumber, StaffType type) {
         default: taskName = "Working"; break;
     }
     staff->currentTask = taskName;
-    
+
     logEvent(state, staff->name + " (" + getStaffName(type) + ") sent to Room " + std::to_string(roomNumber) + " for " + taskName + ".");
+    return true;
 }
 
 inline void updateStaff(GameState& state, float deltaTime) {
@@ -430,52 +424,37 @@ inline void updateGuestPatience(GameState& state, float deltaTime) {
     }
 }
 
-inline bool handleAlert(GameState& state, Alert& alert, const std::string& action) {
+// Which staff type makes sense for a given alert. The player no longer picks -
+// showing up at the room is the decision; the front desk just dispatches
+// whoever handles that kind of problem.
+inline StaffType getAlertStaffType(AlertType type) {
+    switch (type) {
+        case AlertType::FIRE:               return StaffType::SECURITY;
+        case AlertType::FLOOD:              return StaffType::MAINTENANCE;
+        case AlertType::NOISE_COMPLAINT:    return StaffType::SECURITY;
+        case AlertType::ROOM_EATING_SOMEONE: return StaffType::MAINTENANCE;
+        case AlertType::PARADOX_DETECTED:   return StaffType::SECURITY;
+        case AlertType::INSPECTOR_ARRIVING: return StaffType::MANAGER;
+        case AlertType::ELEVATOR_SENTIENT:  return StaffType::MAINTENANCE;
+        case AlertType::KEY_DUPLICATION:    return StaffType::SECURITY;
+        case AlertType::TEMPORAL_LOOP:      return StaffType::MAINTENANCE;
+        case AlertType::GUEST_MISSING:      return StaffType::SECURITY;
+        case AlertType::NONE:                break;
+    }
+    return StaffType::MANAGER;
+}
+
+// Resolving an alert now happens by walking to the room it's tied to and
+// interacting with the door - see GameEngine::interactWithDoor.
+inline bool resolveAlert(GameState& state, Alert& alert) {
     if (alert.handled) return true;
-    
-    if (action == "IGNORE") {
-        logEvent(state, "Alert ignored: " + alert.message);
+
+    if (sendStaffToRoom(state, alert.relatedRoom, getAlertStaffType(alert.type))) {
         alert.handled = true;
+        state.complaintsHandled++;
+        logEvent(state, "Resolved: " + alert.message);
         return true;
     }
-    
-    if (action == "SEND_SECURITY") {
-        Staff* staff = findAvailableStaff(state);
-        if (staff) {
-            sendStaffToRoom(state, alert.relatedRoom, StaffType::SECURITY);
-            alert.handled = true;
-            state.complaintsHandled++;
-            logEvent(state, "Sent security to handle: " + alert.message);
-            return true;
-        }
-        logEvent(state, "No staff available to handle alert!");
-        return false;
-    }
-    
-    if (action == "SEND_MAINTENANCE") {
-        Staff* staff = findAvailableStaff(state);
-        if (staff) {
-            sendStaffToRoom(state, alert.relatedRoom, StaffType::MAINTENANCE);
-            alert.handled = true;
-            state.complaintsHandled++;
-            logEvent(state, "Sent maintenance to handle: " + alert.message);
-            return true;
-        }
-        return false;
-    }
-    
-    if (action == "SEND_MAID") {
-        Staff* staff = findAvailableStaff(state);
-        if (staff) {
-            sendStaffToRoom(state, alert.relatedRoom, StaffType::MAID);
-            alert.handled = true;
-            state.complaintsHandled++;
-            logEvent(state, "Sent maid to handle: " + alert.message);
-            return true;
-        }
-        return false;
-    }
-    
     return false;
 }
 

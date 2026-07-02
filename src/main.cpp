@@ -40,9 +40,6 @@ bool processInput(SDL_Event& event) {
                     case GameEngine::GameScreen::PHONE_CALL:
                         engine.hangUpPhone();
                         break;
-                    case GameEngine::GameScreen::ALERT_POPUP:
-                        engine.handleAlertAction(engine.ui.selectedAlertIndex, "IGNORE");
-                        break;
                     case GameEngine::GameScreen::GUEST_DETAIL:
                         engine.ui.currentScreen = GameEngine::GameScreen::LOBBY;
                         break;
@@ -66,13 +63,6 @@ bool processInput(SDL_Event& event) {
                 continue;
             }
 
-            if (engine.ui.currentScreen == GameEngine::GameScreen::ALERT_POPUP) {
-                if (key == SDLK_1) engine.handleAlertAction(engine.ui.selectedAlertIndex, "SEND_SECURITY");
-                else if (key == SDLK_2) engine.handleAlertAction(engine.ui.selectedAlertIndex, "SEND_MAINTENANCE");
-                else if (key == SDLK_3) engine.handleAlertAction(engine.ui.selectedAlertIndex, "SEND_MAID");
-                continue;
-            }
-
             if (engine.ui.currentScreen == GameEngine::GameScreen::ELEVATOR_MENU) {
                 if (key == SDLK_w || key == SDLK_UP) engine.moveElevatorSelection(-1);
                 else if (key == SDLK_s || key == SDLK_DOWN) engine.moveElevatorSelection(1);
@@ -91,29 +81,6 @@ bool processInput(SDL_Event& event) {
 
             if (key == SDLK_e) {
                 engine.interact(renderer.screenW, renderer.screenH);
-                continue;
-            }
-
-            if (key == SDLK_p) {
-                int alertIdx = engine.getFirstUnhandledAlert();
-                if (alertIdx >= 0) {
-                    engine.ui.selectedAlertIndex = alertIdx;
-                    engine.ui.currentScreen = GameScreen::ALERT_POPUP;
-                }
-                continue;
-            }
-
-            if (key == SDLK_TAB) {
-                int startIdx = engine.ui.selectedAlertIndex + 1;
-                if (startIdx >= (int)engine.state.activeAlerts.size()) startIdx = 0;
-                for (int i = 0; i < (int)engine.state.activeAlerts.size(); i++) {
-                    int idx = (startIdx + i) % engine.state.activeAlerts.size();
-                    if (!engine.state.activeAlerts[idx].handled) {
-                        engine.ui.selectedAlertIndex = idx;
-                        engine.ui.currentScreen = GameScreen::ALERT_POPUP;
-                        break;
-                    }
-                }
                 continue;
             }
 

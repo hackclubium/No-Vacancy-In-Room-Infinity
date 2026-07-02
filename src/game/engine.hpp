@@ -20,7 +20,6 @@ enum class GameScreen {
     PHONE_CALL,      // lobby scene + a phone dialogue box overlay
     ELEVATOR_MENU,   // floor-select menu
     HALLWAY,         // walkable corridor for the selected floor
-    ALERT_POPUP,
     END_OF_DAY
 };
 
@@ -77,7 +76,6 @@ struct UIAction {
 struct UIState {
     GameScreen currentScreen = GameScreen::TITLE;
     int selectedGuestId = -1;
-    int selectedAlertIndex = -1;
     PhoneCall currentCall;
     bool phoneAnswered = false;
     float flashTimer = 0.0f;
@@ -408,18 +406,9 @@ public:
         }
     }
 
-    void handleAlertAction(int alertIndex, const std::string& action) {
-        if (alertIndex < 0 || alertIndex >= (int)state.activeAlerts.size()) return;
-
-        hotel_manager::handleAlert(state, state.activeAlerts[alertIndex], action);
-        ui.currentScreen = GameScreen::LOBBY;
-        ui.selectedAlertIndex = -1;
-    }
-
     void returnToLobby() {
         ui.currentScreen = GameScreen::LOBBY;
         ui.selectedGuestId = -1;
-        ui.selectedAlertIndex = -1;
         state.currentFloor = -1;
     }
 
@@ -438,20 +427,6 @@ public:
     Guest* getSelectedGuest() {
         if (ui.selectedGuestId < 0) return nullptr;
         return hotel_manager::findGuest(state, ui.selectedGuestId);
-    }
-
-    bool hasUnhandledAlerts() {
-        for (auto& a : state.activeAlerts) {
-            if (!a.handled) return true;
-        }
-        return false;
-    }
-
-    int getFirstUnhandledAlert() {
-        for (int i = 0; i < (int)state.activeAlerts.size(); i++) {
-            if (!state.activeAlerts[i].handled) return i;
-        }
-        return -1;
     }
 
     // === Movement & spatial interaction ===
@@ -532,6 +507,15 @@ public:
                     result.type = InteractionType::DOOR;
                     result.targetId = doors[i]->number;
                     result.prompt = "[E] " + doors[i]->name;
+
+                    for (auto& alert : state.activeAlerts) {
+                        if (!alert.handled && alert.relatedRoom == doors[i]->number) {
+                            std::string shortMsg = alert.message;
+                            if (shortMsg.size() > 40) shortMsg = shortMsg.substr(0, 37) + "...";
+                            result.prompt = "[E] Investigate: " + shortMsg;
+                            break;
+                        }
+                    }
                     return result;
                 }
             }
@@ -576,6 +560,18 @@ public:
     void interactWithDoor(int roomNumber) {
         Room* room = hotel_manager::findRoom(state, roomNumber);
         if (!room) return;
+
+        for (auto& alert : state.activeAlerts) {
+            if (!alert.handled && alert.relatedRoom == roomNumber) {
+                if (hotel_manager::resolveAlert(state, alert)) {
+                    ui.statusMessage = "Handled: " + alert.message;
+                } else {
+                    ui.statusMessage = "No one's free to handle this right now.";
+                }
+                ui.statusTimer = 3.0f;
+                return;
+            }
+        }
 
         if (ui.selectedGuestId >= 0 && !room->occupied && isWaitingGuest(ui.selectedGuestId)) {
             assignRoomToGuest(roomNumber);

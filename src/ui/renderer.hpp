@@ -76,6 +76,12 @@ inline UIColor getImpressionColor(RoomRule rule) {
     return COLOR_ACCENT;
 }
 
+// 0 at the start of a shift, 1 by the time it ends - the lobby and hallways
+// dim toward night as the timer runs down.
+inline float getShiftDarkness(const GameState& state) {
+    return std::clamp(1.0f - state.shiftTimer / 300.0f, 0.0f, 1.0f);
+}
+
 class Renderer {
 public:
     SDL_Window* window = nullptr;
@@ -255,6 +261,20 @@ public:
 
     void drawPanelShadow(const UIRect& r, int radius = 10, int offset = 6) {
         fillRoundedRect({r.x + offset, r.y + offset, r.w, r.h}, radius, COLOR_SHADOW);
+    }
+
+    // A soft warm glow that punches through the dark overlay via additive
+    // blending - layered rings stack brightest toward the center.
+    void drawLightPool(int cx, int cy, int maxRadius, const UIColor& color) {
+        SDL_SetRenderDrawBlendMode(sdlRenderer, SDL_BLENDMODE_ADD);
+        static const float radii[]  = {1.0f, 0.7f, 0.45f, 0.22f};
+        static const Uint8 alphas[] = {14, 18, 24, 34};
+        for (int i = 0; i < 4; i++) {
+            UIColor c = color;
+            c.a = alphas[i];
+            fillCircle(cx, cy, (int)(maxRadius * radii[i]), c);
+        }
+        SDL_SetRenderDrawBlendMode(sdlRenderer, SDL_BLENDMODE_BLEND);
     }
 
     // A rounded panel with a shadow behind it - the standard panel look used everywhere.
@@ -681,6 +701,23 @@ public:
         drawInteractPrompt(near.prompt, engine.state.playerX, engine.state.playerY);
         drawPlayerAvatar(engine.state.playerX, engine.state.playerY);
 
+        // Shift darkens toward the end - dim the room and punch light back
+        // in at the desk lamp, elevator, and a couple of wall sconces.
+        float darkness = getShiftDarkness(engine.state);
+        if (darkness > 0.02f) {
+            setColor({6, 5, 12, (Uint8)(darkness * 130)});
+            fillRect({0, 0, screenW, screenH});
+
+            UIColor lampColor = {255, 205, 120, 255};
+            UIColor elevatorGlow = {190, 180, 230, 255};
+
+            drawLightPool(monitorX + 60, deskY - 30, 220, lampColor);
+            drawLightPool(elevatorX + elevatorW / 2, elevatorY + elevatorH / 2, 190, elevatorGlow);
+            for (int x = 150; x < screenW - 150; x += 260) {
+                drawLightPool(x, 60, 150, lampColor);
+            }
+        }
+
         if (engine.ui.selectedGuestId >= 0 && engine.isWaitingGuest(engine.ui.selectedGuestId)) {
             drawText("Selected a guest - head to the elevator to assign a room",
                 screenW / 2, screenH - 195, fontSmall, COLOR_HIGHLIGHT, true);
@@ -697,14 +734,27 @@ public:
 
         drawText("Day " + std::to_string(engine.state.dayNumber), screenW - 160, 38, fontSmall, COLOR_TEXT_DIM);
 
-        // Alert count
+        // Active alerts - tells the player which room to go handle, but
+        // doesn't block anything. Resolving happens by walking there.
         int alertCount = 0;
+        Alert* firstAlert = nullptr;
         for (auto& a : engine.state.activeAlerts) {
-            if (!a.handled) alertCount++;
+            if (!a.handled) {
+                alertCount++;
+                if (!firstAlert) firstAlert = &a;
+            }
         }
-        if (alertCount > 0) {
-            setColor(COLOR_DANGER);
-            drawText("ALERTS: " + std::to_string(alertCount), 20, 15, font, COLOR_DANGER);
+        if (firstAlert) {
+            Room* alertRoom = hotel_manager::findRoom(engine.state, firstAlert->relatedRoom);
+            std::string floorName = alertRoom ? room_system::getRoomFloorName(alertRoom->floor) : "?";
+            std::string shortMsg = firstAlert->message;
+            if (shortMsg.size() > 46) shortMsg = shortMsg.substr(0, 43) + "...";
+            UIColor c = firstAlert->timeLeft < 10.0f ? COLOR_DANGER : COLOR_WARN;
+            drawText("ALERT - Room " + std::to_string(firstAlert->relatedRoom) + " (" + floorName + " Fl): " + shortMsg,
+                20, 15, fontSmall, c);
+            if (alertCount > 1) {
+                drawText("+" + std::to_string(alertCount - 1) + " more active", 20, 33, fontSmall, COLOR_TEXT_DIM);
+            }
         }
 
         // Status message
@@ -907,6 +957,15 @@ public:
             if (room->rule != RoomRule::NORMAL && room->occupied) doorColor = {55, 25, 55, 255};
             if (!room->occupied && (!room->isClean || room->needsMaintenance)) doorColor = {50, 45, 35, 255};
 
+            bool hasAlert = false;
+            for (auto& a : engine.state.activeAlerts) {
+                if (!a.handled && a.relatedRoom == room->number) { hasAlert = true; break; }
+            }
+            if (hasAlert) {
+                float pulse = 0.5f + 0.5f * sinf((float)tick * 0.2f);
+                doorColor = {(Uint8)(140 + pulse * 60), 35, 30, 255};
+            }
+
             if (near.type == InteractionType::DOOR && near.targetId == room->number) {
                 drawHoverGlow(doorX, (float)(corridorY + 60));
             }
@@ -920,6 +979,9 @@ public:
             // Door handle
             fillCircle((int)doorX + 16, corridorY, 2, COLOR_ACCENT);
 
+            if (hasAlert) {
+                drawRuleBadge("!", (int)doorX, corridorY - 78, COLOR_DANGER);
+            }
             drawRuleBadge(room_system::getRuleIcon(room->rule), (int)doorX, corridorY - 55, getImpressionColor(room->rule));
             drawText(room->name, (int)doorX, corridorY - 35, fontSmall,
                 room->occupied ? COLOR_DANGER : COLOR_SUCCESS, true);
@@ -927,6 +989,20 @@ public:
 
         drawInteractPrompt(near.prompt, engine.state.hallwayPlayerX, (float)(corridorY + 60));
         drawPlayerAvatar(engine.state.hallwayPlayerX, (float)(corridorY + 60));
+
+        // Matches the lobby's shift-long dusk - sconces keep the corridor
+        // from going fully dark.
+        float darkness = getShiftDarkness(engine.state);
+        if (darkness > 0.02f) {
+            setColor({6, 5, 12, (Uint8)(darkness * 130)});
+            fillRect({0, 0, screenW, screenH});
+
+            drawLightPool((int)layout::hallwayElevatorX(), corridorY - 20, 170, {190, 180, 230, 255});
+            UIColor lampColor = {255, 205, 120, 255};
+            for (int x = 260; x < screenW; x += 260) {
+                drawLightPool(x, corridorY - 90, 150, lampColor);
+            }
+        }
 
         // Passive room-info tooltip when standing near a door
         if (near.type == InteractionType::DOOR) {
@@ -944,7 +1020,14 @@ public:
                 if (sel->needsMaintenance) statusLine += " | Needs maintenance";
                 drawText(statusLine, infoX + 15, infoY + 54, fontSmall, COLOR_TEXT_DIM);
 
-                if (engine.ui.selectedGuestId >= 0 && engine.isWaitingGuest(engine.ui.selectedGuestId) && !sel->occupied) {
+                bool selHasAlert = false;
+                for (auto& a : engine.state.activeAlerts) {
+                    if (!a.handled && a.relatedRoom == sel->number) { selHasAlert = true; break; }
+                }
+
+                if (selHasAlert) {
+                    drawText("[E] Investigate and send the right staff", infoX + 15, infoY + 74, fontSmall, COLOR_DANGER);
+                } else if (engine.ui.selectedGuestId >= 0 && engine.isWaitingGuest(engine.ui.selectedGuestId) && !sel->occupied) {
                     drawText("[E] Assign this room to your selected guest", infoX + 15, infoY + 74, fontSmall, COLOR_SUCCESS);
                 } else if (engine.ui.selectedGuestId < 0 && !sel->occupied && !sel->isClean) {
                     drawText("[E] Send a maid to clean this room", infoX + 15, infoY + 74, fontSmall, COLOR_WARN);
@@ -960,65 +1043,6 @@ public:
                 drawText("Assigning a room for: " + g->name, screenW / 2, 90, fontSmall, COLOR_HIGHLIGHT, true);
             }
         }
-    }
-
-    void drawAlertPopup(GameEngine& engine) {
-        if (engine.ui.selectedAlertIndex < 0 || engine.ui.selectedAlertIndex >= (int)engine.state.activeAlerts.size()) {
-            engine.returnToLobby();
-            return;
-        }
-
-        Alert& alert = engine.state.activeAlerts[engine.ui.selectedAlertIndex];
-
-        fillGradient(0, 0, screenW, screenH, COLOR_BG, COLOR_PANEL_BG);
-
-        drawText("=== ALERT ===", screenW/2, 40, fontTitle, COLOR_DANGER, true);
-
-        int panelX = screenW/2 - 300;
-        int panelY = 100;
-
-        int panelW = 600;
-        int contentW = panelW - 60;
-        auto messageLines = wrapText(alert.message, font, contentW);
-        int messageH = (int)messageLines.size() * 26;
-
-        drawPanel({panelX, panelY, panelW, 350}, {44, 22, 22, 255}, COLOR_DANGER);
-
-        drawTextWrapped(alert.message, panelX + 30, panelY + 30, font, COLOR_TEXT_BRIGHT, contentW, 26);
-
-        int infoY = panelY + 30 + messageH + 10;
-        if (alert.relatedRoom > 0) {
-            drawText("Room: " + std::to_string(alert.relatedRoom), panelX + 30, infoY, fontSmall, COLOR_ACCENT2);
-            infoY += 25;
-        }
-
-        char timeBuf[32];
-        snprintf(timeBuf, sizeof(timeBuf), "Time to resolve: %.0fs", alert.timeLeft);
-        UIColor timeColor = alert.timeLeft < 10.0f ? COLOR_DANGER : COLOR_WARN;
-        drawText(timeBuf, panelX + 30, infoY, fontSmall, timeColor);
-
-        // Action buttons - anchored to the bottom of the panel so a long,
-        // wrapped message never runs into them.
-        int actionsY = panelY + 350 - 200;
-        struct { std::string label; std::string action; int yOff; } actions[] = {
-            {"[1] Send Security", "SEND_SECURITY", 0},
-            {"[2] Send Maintenance", "SEND_MAINTENANCE", 45},
-            {"[3] Send Maid", "SEND_MAID", 90},
-            {"[ESC] Ignore / Back", "IGNORE", 135},
-        };
-
-        for (auto& act : actions) {
-            UIRect btn = {panelX + 30, actionsY + act.yOff, 250, 35};
-            fillRoundedRect(btn, 6, COLOR_BUTTON_BG);
-            setColor(COLOR_PANEL_BORDER);
-            drawRect(btn);
-            drawText(act.label, panelX + 40, actionsY + 8 + act.yOff, fontSmall, COLOR_TEXT);
-        }
-
-        drawText("Unhandled alerts: " + std::to_string(
-            std::count_if(engine.state.activeAlerts.begin(), engine.state.activeAlerts.end(),
-                [](const Alert& a) { return !a.handled; })
-        ), panelX + 30, actionsY + 180, fontSmall, COLOR_TEXT_DIM);
     }
 
     void drawEndOfDay(GameEngine& engine) {
@@ -1171,7 +1195,7 @@ public:
         drawText("NO VACANCY IN ROOM INFINITY", 15, 8, font, COLOR_ACCENT);
 
         // Controls help
-        drawText("[WASD] Move | [E] Interact | [1-9] Select Guest | [P] Alert | [TAB] Next Alert",
+        drawText("[WASD] Move | [E] Interact | [1-9] Select Guest",
             15, 35, fontSmall, COLOR_TEXT_DIM);
 
         // Room counts
@@ -1217,9 +1241,6 @@ public:
             case GameEngine::GameScreen::HALLWAY:
                 drawHallwayScene(engine);
                 drawHUD(engine);
-                break;
-            case GameEngine::GameScreen::ALERT_POPUP:
-                drawAlertPopup(engine);
                 break;
             case GameEngine::GameScreen::END_OF_DAY:
                 drawEndOfDay(engine);
