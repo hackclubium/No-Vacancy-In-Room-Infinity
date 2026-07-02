@@ -18,7 +18,7 @@ if(EMSCRIPTEN)
         -sUSE_SDL=2
         -sUSE_SDL_TTF=2
         -sUSE_SDL_IMAGE=2
-        -sSDL2_IMAGE_FORMATS='["png"]'
+        -sSDL2_IMAGE_FORMATS=["png"]
         -sALLOW_MEMORY_GROWTH=1
         -sWASM=1
         -sEXIT_RUNTIME=0
@@ -29,7 +29,7 @@ if(EMSCRIPTEN)
         -sUSE_SDL=2
         -sUSE_SDL_TTF=2
         -sUSE_SDL_IMAGE=2
-        -sSDL2_IMAGE_FORMATS='["png"]'
+        -sSDL2_IMAGE_FORMATS=["png"]
         -sALLOW_MEMORY_GROWTH=1
         -sWASM=1
         -sEXIT_RUNTIME=0
