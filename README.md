@@ -1,5 +1,7 @@
 # No Vacancy In Room ∞
 
+![Screenshot of homescreen](assets/screenshot.png)
+
 A surreal hotel management game where every room breaks reality in a different way. Run the front desk, check guests into rooms that duplicate them, age them backwards, or simply don't exist, and try to make it through a shift without losing your mind (or your rooms).
 
 [![Build and Deploy](https://img.shields.io/github/actions/workflow/status/hackclubium/No-Vacancy-In-Room-Infinity/deploy.yml?branch=main&label=build%20%26%20deploy&style=flat-square)](https://github.com/hackclubium/No-Vacancy-In-Room-Infinity/actions/workflows/deploy.yml)
@@ -16,12 +18,12 @@ You're behind the front desk of a hotel where the rooms don't follow the rules. 
 
 ## Features
 
-- **Walkable lobby, elevator, and hallways** — no menus, you move a character around with WASD and interact with whatever's nearby
+- **Walkable lobby, elevator, and hallways**, no menus, you move a character around with WASD and interact with whatever's nearby
 - **10 guest types**, each with their own quirks, requests, and sprite art, from ordinary humans to vampires, ghosts, time travelers, and one very undercover hotel inspector
 - **17 room rules**, from perfectly normal to reality-breaking (bigger on the inside, ages guests backward, duplicates its occupant, doesn't exist)
-- **A live alert system** — problems happen in specific rooms, and resolving them means walking there and dealing with it, not clicking through a popup
-- **Staff to dispatch** — maids, maintenance, and security who handle the fallout
-- **A shift clock with real stakes** — the lobby and hallways dim toward night as your shift runs down
+- **A live alert system**, problems happen in specific rooms, and resolving them means walking there and dealing with it, not clicking through a popup
+- **Staff to dispatch**: maids, maintenance, and security who handle the fallout
+- **A shift clock with real stakes**, the lobby and hallways dim toward night as your shift runs down
 - **A secret inspector** who shows up undercover every few shifts and grades you on the room you gave them
 
 ## Controls
